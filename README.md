@@ -52,6 +52,8 @@ Save the place in Studio to keep those.
 | Tutorial steps and text | `src/shared/Config.luau` (`Config.Tutorial`) |
 | Snowball cooldown, speed, stun time | `src/shared/Config.luau` (`Config.Snowball`) |
 | How often presents drop and what they pay | `src/shared/Config.luau` (`Config.Presents`) |
+| Event timer, rewards, Santa's runway, Yeti HP | `src/shared/Config.luau` (`Config.Events`) |
+| Add a new timed event | add a module to `src/server/Events/` (see the notes at the top of `EventService.luau`) |
 | Where the market, pile, shop and wheel stand | `src/shared/Config.luau` (`Config.Hub`) |
 | UI colours and fonts | `src/client/UI/Theme.luau` |
 | A tool's or machine's 3D model | `src/shared/Models.luau` |
@@ -70,6 +72,12 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
   tool. An arrow and a line on the ground show where to go. **Help, Replay tutorial** runs it again.
 - **Snowball fights:** with Bare Hands equipped, press **Q** (or **THROW** on mobile) to throw a
   snowball. A hit stuns the other player for half a second with a stumble.
+- **Timed events:** every 10 minutes (1 minute when testing in Studio) a random event starts,
+  with a countdown, timer and progress bar at the top of the screen. Everyone who helps gets coins.
+  - **Santa Sled Party:** deep snow piles onto the main road and stops growing back. Clear it
+    (scooping there is faster and doesn't fill your load) so Santa and his 3 reindeer can take off.
+  - **Yeti Abomination:** a Yeti rises out of the snow. Everyone can throw snowballs (Q), whatever
+    tool they hold. Its HP is 15 snowballs per player in the server.
 - **Falling presents:** every minute or so, presents float down from the sky somewhere in town.
   Walk into one for bonus coins.
 
@@ -112,6 +120,9 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 | `src/server/SnowService.luau` | ServerScriptService.Server | Regrowing snow tiles |
 | `src/server/SnowballService.luau` | ServerScriptService.Server | Snowball throws, server-checked hits, stun |
 | `src/server/PresentService.luau` | ServerScriptService.Server | Presents dropping from the sky, pickups |
+| `src/server/EventService.luau` | ServerScriptService.Server | Event timer: picks and runs a random event |
+| `src/server/Events/SantaSled.luau` | ...Server.Events | Santa Sled Party |
+| `src/server/Events/Yeti.luau` | ...Server.Events | Yeti Abomination |
 | `src/server/DataService.luau` | ServerScriptService.Server | DataStore saving |
 | `src/client/Client.client.luau` | StarterPlayerScripts.Client | Starts the UI, input, server messages |
 | `src/client/UI/Theme.luau` | ...Client.UI | Colours, fonts, drawn coin and arrow icons |
@@ -120,6 +131,7 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 | `src/client/UI/ShopPanel.luau` | ...Client.UI | Shopping list |
 | `src/client/UI/DailyPanel.luau` | ...Client.UI | Daily rewards |
 | `src/client/UI/SpinPanel.luau` | ...Client.UI | Lucky Spin wheel |
+| `src/client/UI/EventBar.luau` | ...Client.UI | Event countdown and progress / HP bar |
 | `src/client/UI/HelpPanel.luau` | ...Client.UI | How to play, replay tutorial |
 | `src/client/Tutorial.luau` | ...Client | Step card, world arrow, ground line, screen-edge arrow |
 | `src/client/Snowballs.luau` | ...Client | Throw input, snowball visuals, stumble |

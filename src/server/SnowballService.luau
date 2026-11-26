@@ -14,6 +14,7 @@ local SB = Config.Snowball
 local SnowballService = {}
 
 -- canThrow(player) -> boolean ; onStun(player, seconds) ; walkSpeed(player) -> number
+-- onHit(instance, thrower) -> boolean (true = an event used the hit)
 function SnowballService.Init(remotes: Folder, hooks)
 	local throwRemote = Instance.new("RemoteEvent")
 	throwRemote.Name = "ThrowSnowball"
@@ -102,6 +103,9 @@ function SnowballService.Init(remotes: Folder, hooks)
 			local hit = Workspace:Spherecast(b.pos, SB.Radius, step, b.params)
 			if hit then
 				table.remove(flying, i)
+				if hooks.onHit and hooks.onHit(hit.Instance, b.thrower) then
+					continue -- an event (like the Yeti) took the hit
+				end
 				local model = hit.Instance:FindFirstAncestorOfClass("Model")
 				local victim = model and Players:GetPlayerFromCharacter(model)
 				if victim and victim ~= b.thrower then

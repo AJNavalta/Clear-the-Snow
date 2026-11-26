@@ -210,6 +210,7 @@ function Hud.refresh()
 		end
 	end
 	local hands = player:GetAttribute("Equipped") == "hands"
+		or game:GetService("ReplicatedStorage"):FindFirstChild("EventState") and game:GetService("ReplicatedStorage").EventState:GetAttribute("SnowballsForAll") == true
 	if Panels.isTouch then
 		hint.Text = if hands then "Hold SCOOP in the snow  |  THROW a snowball" else "Hold SCOOP in the snow"
 	else

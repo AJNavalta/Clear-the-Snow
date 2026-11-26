@@ -16,6 +16,7 @@ local SnowService = require(script.Parent.SnowService)
 local DataService = require(script.Parent.DataService)
 local SnowballService = require(script.Parent.SnowballService)
 local PresentService = require(script.Parent.PresentService)
+local EventService = require(script.Parent.EventService)
 
 local H = Config.Hub
 
@@ -165,13 +166,16 @@ SnowballService.Init(remotes, {
 	-- only with Bare Hands equipped
 	canThrow = function(player)
 		local d = DataService.Get(player)
-		return d ~= nil and d.equipped == "hands"
+		return d ~= nil and (d.equipped == "hands" or EventService.SnowballsForAll())
 	end,
 	onStun = function(player)
 		local r = runtime[player]
 		if r then
 			r.scooping = false
 		end
+	end,
+	onHit = function(inst, thrower)
+		return EventService.HandleSnowballHit(inst, thrower)
 	end,
 	walkSpeed = function(player)
 		local d = DataService.Get(player)
@@ -189,6 +193,21 @@ PresentService.Init(Notify, function(player)
 	publish(player)
 	return coins
 end)
+EventService.Init({
+	Notify = Notify,
+	SnowService = SnowService,
+	-- coins for helping with an event that succeeded
+	reward = function(player)
+		local d = DataService.Get(player)
+		if not d then
+			return 0
+		end
+		local coins = math.max(Config.Events.RewardMin, math.floor(progressCoins(d) * Config.Events.RewardShare + 0.5))
+		d.coins += coins
+		publish(player)
+		return coins
+	end,
+})
 remotes.Parent = ReplicatedStorage
 
 function publish(player: Player)
@@ -668,18 +687,30 @@ RunService.Heartbeat:Connect(function(dt)
 		local moving = hum.MoveDirection.Magnitude > 0.1
 		local wants = r.scooping or d.auto or (tool.kind == "machine" and moving)
 		local working = false
-		if wants and d.load < cap - 1e-6 then
+		local inZone = false
+		if wants then
 			local look = hrp.CFrame.LookVector
 			local flat = Vector3.new(look.X, 0, look.Z)
 			flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
 			local pos = hrp.Position + flat * r.front
-			local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
-			if got > 0 then
-				d.load = math.min(cap, d.load + got)
-				working = true
+			local zone = EventService.ZoneAt(pos.X, pos.Z)
+			if zone then
+				-- event clear-zone (e.g. Santa's runway): snow is shoveled aside, not carried
+				inZone = true
+				local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, tool.rate * dt * zone.boost)
+				if got > 0 then
+					zone.onCleared(player, got)
+					working = true
+				end
+			elseif d.load < cap - 1e-6 then
+				local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
+				if got > 0 then
+					d.load = math.min(cap, d.load + got)
+					working = true
+				end
 			end
 		end
-		if d.load >= cap - 1e-6 then
+		if d.load >= cap - 1e-6 and not inZone then
 			if wants and not r.fullWarned then
 				r.fullWarned = true
 				Notify:FireClient(player, "full")

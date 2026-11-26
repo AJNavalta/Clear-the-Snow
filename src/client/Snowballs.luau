@@ -23,8 +23,11 @@ local Fx = Remotes:WaitForChild("SnowballFx")
 
 local Snowballs = {}
 
+local eventState = ReplicatedStorage:WaitForChild("EventState")
+
+-- Bare Hands can always throw; during some events (the Yeti) everyone can
 local function hasHands(): boolean
-	return player:GetAttribute("Equipped") == "hands"
+	return player:GetAttribute("Equipped") == "hands" or eventState:GetAttribute("SnowballsForAll") == true
 end
 
 -- ---------------------------------------------------------------- throwing
@@ -77,6 +80,7 @@ local function refreshButton()
 	end
 end
 player:GetAttributeChangedSignal("Equipped"):Connect(refreshButton)
+eventState:GetAttributeChangedSignal("SnowballsForAll"):Connect(refreshButton)
 refreshButton()
 
 -- ---------------------------------------------------------------- snowballs in flight

@@ -17,6 +17,7 @@ local REGROW_RATE = MAX / Config.REGROW_SECONDS
 local units: { number } = table.create(N * N, MAX)
 local blocked: { boolean } = table.create(N * N, false)
 local cooldown: { number } = table.create(N * N, 0)
+local frozen: { boolean } = table.create(N * N, false) -- events can stop tiles regrowing
 local parts: { [number]: BasePart } = {}
 local dirty: { [number]: boolean } = {}
 local folder: Folder
@@ -102,7 +103,7 @@ function SnowService.Init(rects: { { number } })
 		while true do
 			task.wait(step)
 			for k = 1, N * N do
-				if not blocked[k] and units[k] < MAX then
+				if not blocked[k] and not frozen[k] and units[k] < MAX then
 					if cooldown[k] > 0 then
 						cooldown[k] -= step
 					else
@@ -162,6 +163,50 @@ function SnowService.Harvest(x: number, z: number, radius: number, amount: numbe
 		dirty[k] = true
 	end
 	return take
+end
+
+-- ---------------------------------------------------------------- helpers for events
+-- tile ids inside a rectangle { x0, z0, x1, z1 } (studs), skipping tiles without snow
+function SnowService.TilesInRect(r: { number }): { number }
+	local list = {}
+	local i0, j0 = tileOf(math.min(r[1], r[3]), math.min(r[2], r[4]))
+	local i1, j1 = tileOf(math.max(r[1], r[3]) - 0.01, math.max(r[2], r[4]) - 0.01)
+	for j = math.max(0, j0), math.min(N - 1, j1) do
+		for i = math.max(0, i0), math.min(N - 1, i1) do
+			local k = idx(i, j)
+			if not blocked[k] then
+				table.insert(list, k)
+			end
+		end
+	end
+	return list
+end
+
+-- stop (or restart) regrowth on these tiles
+function SnowService.SetFrozen(list: { number }, on: boolean)
+	for _, k in list do
+		frozen[k] = on
+		if not on then
+			cooldown[k] = 0
+		end
+	end
+end
+
+-- set these tiles to an exact amount of snow (0..TILE_MAX_UNITS)
+function SnowService.Fill(list: { number }, amount: number)
+	for _, k in list do
+		units[k] = math.clamp(amount, 0, MAX)
+		dirty[k] = true
+	end
+end
+
+-- total snow on these tiles
+function SnowService.Amount(list: { number }): number
+	local t = 0
+	for _, k in list do
+		t += units[k]
+	end
+	return t
 end
 
 function SnowService.DepthAt(x: number, z: number): number

@@ -9,6 +9,7 @@
 --   UI/DailyPanel.luau  daily rewards
 --   UI/SpinPanel.luau   lucky spin wheel
 --   UI/HelpPanel.luau   how to play
+--   UI/EventBar.luau    event countdown and progress / HP bar at the top
 --   Tutorial.luau       step-by-step tutorial with arrows
 --   Snowballs.luau      snowball throwing (Bare Hands), flight visuals, stumble
 --   WorldEffects.luau   pile mound, snowfall, display labels and turntables
@@ -28,6 +29,7 @@ local Shop = require(UI.ShopPanel)
 local Daily = require(UI.DailyPanel)
 local Spin = require(UI.SpinPanel)
 local Help = require(UI.HelpPanel)
+require(UI.EventBar)
 require(script.Parent:WaitForChild("Tutorial"))
 require(script.Parent:WaitForChild("Snowballs"))
 local WorldEffects = require(script.Parent:WaitForChild("WorldEffects"))

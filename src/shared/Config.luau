@@ -141,6 +141,31 @@ Config.Presents = {
 	ProgressShare = 0.15, -- coins = this share of your next upgrade's price (at least MinCoins)
 }
 
+-- Timed events. Every Interval seconds one event is picked at random from the files in
+-- src/server/Events (add a new file there to add an event). A timer and a progress / HP
+-- bar show at the top of the screen. Everyone who helps gets a reward when it succeeds.
+Config.Events = {
+	Interval = 600, -- 10 minutes between events
+	StudioInterval = 60, -- shorter wait when you press Play in Studio, for testing
+	OnlyEvent = nil, -- e.g. "Yeti" or "SantaSled" to always run that one (handy for testing)
+	RewardShare = 0.5, -- reward = this share of your next upgrade's price...
+	RewardMin = 50, -- ...but at least this many coins
+
+	SantaSled = {
+		Duration = 300, -- seconds to clear the road
+		Runway = { -48, 42, 48, 60 }, -- x0, z0, x1, z1 (studs): the stretch of main road to clear
+		SleighPosition = Vector3.new(-62, 0, 51), -- Santa waits here and takes off along +X
+		SnowPerPlayer = 6, -- snow per road tile for each player in the server (max 20)
+		ClearBoost = 2, -- scooping on the runway is this much faster, and needs no space in your load
+		DoneAt = 0.97, -- share of the snow that must be cleared
+	},
+	Yeti = {
+		Duration = 240,
+		HitsPerPlayer = 15, -- Yeti HP = this x players in the server
+		Position = Vector3.new(60, 0, 51), -- where the Yeti appears (on the main road)
+	},
+}
+
 -- Market layout (studs). The hub sits in the plaza at the centre of town.
 Config.Hub = {
 	Spawn = Vector3.new(0, 0, 6),
