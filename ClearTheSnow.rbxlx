@@ -4778,7 +4778,6 @@ local Panels = require(script.Parent.Panels)
 local C, new, label = Theme.C, Theme.new, Theme.label
 
 local state = ReplicatedStorage:WaitForChild("EventState")
-local gui = Panels.gui
 
 local EventBar = {}
 
