@@ -27,6 +27,10 @@ Config.Version = 6
 Config.STUDS_PER_METER = 3
 Config.SNOW_VALUE = 1 -- coins per unit of snow sold
 
+-- Surroundings: a snowy valley floor, forest and mountains (Roblox Terrain) around the town.
+-- Turn this off if you'd rather sculpt your own terrain in Studio.
+Config.BuildMountains = true
+
 -- Snow field
 Config.WORLD_SIZE = 360 -- studs, centred on the origin
 Config.TILE = 6 -- studs per snow tile
@@ -3620,6 +3624,36 @@ function World.SetupLighting()
 	cc.Parent = Lighting
 end
 
+-- distance from the town centre to the fence, in direction `a` (radians)
+function World.EdgeDistance(a: number): number
+	return HALF / math.max(math.abs(math.cos(a)), math.abs(math.sin(a)))
+end
+
+-- Snowy valley: a Terrain snow floor around the town and rings of rocky, snow-capped
+-- mountains. Terrain is cheap to render compared with parts.
+function World.BuildValley()
+	local terrain = workspace.Terrain
+	terrain:FillBlock(CFrame.new(0, -4, 0), Vector3.new(1600, 7.6, 1600), Enum.Material.Snow) -- top sits just under the town ground
+	local rng = Random.new(2024)
+	local rings = {
+		{ offset = 95, count = 44, size = { 26, 42 } }, -- foothills behind the forest
+		{ offset = 165, count = 36, size = { 55, 85 } }, -- mountains
+		{ offset = 290, count = 26, size = { 85, 125 } }, -- big peaks far away
+	}
+	for _, ring in rings do
+		for i = 0, ring.count - 1 do
+			local a = (i + rng:NextNumber() * 0.7) / ring.count * math.pi * 2
+			local r = World.EdgeDistance(a) + ring.offset + rng:NextNumber(-15, 15)
+			local rad = rng:NextNumber(ring.size[1], ring.size[2])
+			local c = Vector3.new(math.cos(a) * r, -rad * 0.35, math.sin(a) * r)
+			terrain:FillBall(c, rad, Enum.Material.Rock)
+			terrain:FillBall(c + Vector3.new(0, rad * 0.32, 0), rad * 0.78, Enum.Material.Snow) -- snow cap
+		end
+	end
+	terrain:SetMaterialColor(Enum.Material.Snow, Color3.fromRGB(236, 243, 252))
+	terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(110, 118, 130))
+end
+
 function World.Build()
 	World.SetupLighting()
 	local root = Instance.new("Folder")
@@ -3635,7 +3669,11 @@ function World.Build()
 
 	-- ground, outer snowfield, roads and plaza
 	part(root, Vector3.new(Config.WORLD_SIZE, 2, Config.WORLD_SIZE), CFrame.new(0, -1, 0), "#6b7d55", Enum.Material.Grass, { Name = "Ground" })
-	part(root, Vector3.new(2000, 2, 2000), CFrame.new(0, -1.05, 0), "#e9f0fa", Enum.Material.Snow, { Name = "OuterSnow" })
+	if Config.BuildMountains then
+		World.BuildValley()
+	else
+		part(root, Vector3.new(2000, 2, 2000), CFrame.new(0, -1.05, 0), "#e9f0fa", Enum.Material.Snow, { Name = "OuterSnow" })
+	end
 	for i, r in World.Roads do
 		local cx, cz = (r[1] + r[3]) / 2, (r[2] + r[4]) / 2
 		part(root, Vector3.new(r[3] - r[1], 0.2, r[4] - r[2]), CFrame.new(cx, 0.0, cz), "#4a4d52", Enum.Material.Asphalt, { Name = "Road" .. i })
@@ -3757,21 +3795,22 @@ function World.Build()
 				part(root, size, CFrame.new(if horiz then 0 else sgn * HALF, y, if horiz then sgn * HALF else 0), "#7b5a3a", Enum.Material.Wood)
 			end
 			-- invisible wall
-			local wall = if horiz then Vector3.new(Config.WORLD_SIZE, 30, 1) else Vector3.new(1, 30, Config.WORLD_SIZE)
-			part(root, wall, CFrame.new(if horiz then 0 else sgn * HALF, 15, if horiz then sgn * HALF else 0), "#000000", nil, { Transparency = 1, Name = "Boundary" })
+			local wall = if horiz then Vector3.new(Config.WORLD_SIZE + 2, 160, 2) else Vector3.new(2, 160, Config.WORLD_SIZE + 2)
+			local b = part(root, wall, CFrame.new(if horiz then 0 else sgn * (HALF + 1), 80, if horiz then sgn * (HALF + 1) else 0), "#000000", nil, { Transparency = 1, Name = "Boundary" })
+			b.CanCollide = true
+			b.CanQuery = false
+			b.CastShadow = false
 		end
 	end
 
-	-- distant forest ring
-	for i = 0, 23 do
-		local a = i / 24 * math.pi * 2
-		for k = 0, 2 do
-			local r = HALF + 25 + k * 20 + rng:NextNumber() * 10
-			local b = a + (rng:NextNumber() - 0.5) * 0.2
-			local t = Models.BuildPine(2 + rng:NextNumber() * 1.5)
-			t:PivotTo(CFrame.new(math.cos(b) * r, 0, math.sin(b) * r))
-			t.Parent = trees
-		end
+	-- forest between the fence and the mountains (no shadows: there are a lot of them)
+	for i = 0, 139 do
+		local a = (i + rng:NextNumber()) / 140 * math.pi * 2
+		local r = World.EdgeDistance(a) + 14 + rng:NextNumber() * 60
+		local t = Models.BuildPine(1.6 + rng:NextNumber() * 1.8)
+		t:PivotTo(CFrame.new(math.cos(a) * r, 0, math.sin(a) * r) * CFrame.Angles(0, rng:NextNumber() * 6, 0))
+		Models.NoShadows(t)
+		t.Parent = trees
 	end
 
 	-- spawn

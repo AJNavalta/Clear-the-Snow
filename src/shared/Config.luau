@@ -15,6 +15,10 @@ Config.Version = 6
 Config.STUDS_PER_METER = 3
 Config.SNOW_VALUE = 1 -- coins per unit of snow sold
 
+-- Surroundings: a snowy valley floor, forest and mountains (Roblox Terrain) around the town.
+-- Turn this off if you'd rather sculpt your own terrain in Studio.
+Config.BuildMountains = true
+
 -- Snow field
 Config.WORLD_SIZE = 360 -- studs, centred on the origin
 Config.TILE = 6 -- studs per snow tile
