@@ -30,6 +30,7 @@ function Event.Run(ev)
 	end)
 
 	local yeti = ev.Models.BuildYeti()
+	local root = ev.Models.Rig(yeti) -- move it by its Root only
 	for _, p in yeti:GetDescendants() do
 		if p:IsA("BasePart") and p.Name ~= "Root" then
 			p.CanQuery = true -- snowballs can hit it
@@ -38,7 +39,7 @@ function Event.Run(ev)
 	end
 	local pos = cfg.Position
 	local facing = CFrame.lookAt(pos, Vector3.new(0, 0, 0) * Vector3.new(1, 0, 1) + Vector3.new(0, pos.Y, 0))
-	yeti:PivotTo(facing * CFrame.new(0, -14, 0))
+	root.CFrame = facing * CFrame.new(0, -14, 0)
 	yeti.Parent = Workspace
 	ev.OnCleanup(function()
 		yeti:Destroy()
@@ -60,7 +61,7 @@ function Event.Run(ev)
 
 	-- rise out of the snow
 	for i = 1, 30 do
-		yeti:PivotTo(facing * CFrame.new(0, -14 + 14 * (i / 30), 0))
+		root.CFrame = facing * CFrame.new(0, -14 + 14 * (i / 30), 0)
 		task.wait(1 / 30)
 	end
 
@@ -96,24 +97,24 @@ function Event.Run(ev)
 		end
 		flinch = math.max(0, flinch - dt * 5)
 		local stomp = math.abs(math.sin(os.clock() * 2)) * 0.5
-		yeti:PivotTo(facing * CFrame.Angles(0, yaw, 0) * CFrame.new(0, stomp, 0) * CFrame.Angles(-0.15 * flinch, 0, 0))
+		root.CFrame = facing * CFrame.Angles(0, yaw, 0) * CFrame.new(0, stomp, 0) * CFrame.Angles(-0.15 * flinch, 0, 0)
 	end
 
-	local finalCf = yeti:GetPivot()
+	local finalCf = root.CFrame
 	if won then
 		ev.SetBar(0, "The Yeti is down!")
 		ev.Announce("The Yeti is knocked out! Great throwing, everyone!", 4)
 		for i = 1, 40 do
-			yeti:PivotTo(finalCf * CFrame.Angles(-math.rad(85) * (i / 40), 0, 0))
+			root.CFrame = finalCf * CFrame.Angles(-math.rad(85) * (i / 40), 0, 0)
 			task.wait(1 / 30)
 		end
 		task.wait(1.5)
-		finalCf = yeti:GetPivot()
+		finalCf = root.CFrame
 	else
 		ev.Announce("The Yeti got away! It'll be back...", 4)
 	end
 	for i = 1, 45 do
-		yeti:PivotTo(finalCf * CFrame.new(0, -0.35 * i, 0))
+		root.CFrame = finalCf * CFrame.new(0, -0.35 * i, 0)
 		task.wait(1 / 30)
 	end
 	return won

@@ -1504,6 +1504,25 @@ function Models.Weld(model: Model)
 	end
 end
 
+-- Weld every part to the Root and keep only the Root anchored. Moving the model is then a
+-- single CFrame write on the Root (model.PrimaryPart.CFrame = ...), which is far cheaper
+-- than PivotTo on a model with hundreds of parts, and only one part replicates.
+function Models.Rig(model: Model): BasePart
+	Models.Weld(model)
+	local root = model.PrimaryPart :: BasePart
+	root.Anchored = true
+	return root
+end
+
+-- turn off shadows on every part (big savings for detailed models on display)
+function Models.NoShadows(model: Instance)
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.CastShadow = false
+		end
+	end
+end
+
 return Models
 ]]></string>
         </Properties>
@@ -2000,6 +2019,7 @@ function Event.Run(ev)
 	local sleigh = ev.Models.BuildSleigh()
 	local base = CFrame.lookAt(cfg.SleighPosition, cfg.SleighPosition + Vector3.xAxis)
 	sleigh:PivotTo(base)
+	local root = ev.Models.Rig(sleigh) -- move it by its Root only
 	sleigh.Parent = folder
 	ev.Billboard(sleigh.PrimaryPart, "SANTA", "Waiting for a clear road", 9)
 
@@ -2021,7 +2041,7 @@ function Event.Run(ev)
 			break
 		end
 		-- reindeer get restless
-		sleigh:PivotTo(base * CFrame.new(0, math.abs(math.sin(os.clock() * 3)) * 0.15, 0))
+		root.CFrame = base * CFrame.new(0, math.abs(math.sin(os.clock() * 3)) * 0.15, 0)
 		task.wait(0.2)
 	end
 
@@ -2047,7 +2067,7 @@ function Event.Run(ev)
 		local x = 4 * t + 3 * t * t
 		local y = math.max(0, t - 1.2) ^ 2 * 2.2
 		local pitch = math.clamp((t - 1.2) * 0.12, 0, 0.35)
-		sleigh:PivotTo(base * CFrame.new(0, y, -x) * CFrame.Angles(pitch, 0, 0))
+		root.CFrame = base * CFrame.new(0, y, -x) * CFrame.Angles(pitch, 0, 0)
 		RunService.Heartbeat:Wait()
 	end
 	return true
@@ -2092,6 +2112,7 @@ function Event.Run(ev)
 	end)
 
 	local yeti = ev.Models.BuildYeti()
+	local root = ev.Models.Rig(yeti) -- move it by its Root only
 	for _, p in yeti:GetDescendants() do
 		if p:IsA("BasePart") and p.Name ~= "Root" then
 			p.CanQuery = true -- snowballs can hit it
@@ -2100,7 +2121,7 @@ function Event.Run(ev)
 	end
 	local pos = cfg.Position
 	local facing = CFrame.lookAt(pos, Vector3.new(0, 0, 0) * Vector3.new(1, 0, 1) + Vector3.new(0, pos.Y, 0))
-	yeti:PivotTo(facing * CFrame.new(0, -14, 0))
+	root.CFrame = facing * CFrame.new(0, -14, 0)
 	yeti.Parent = Workspace
 	ev.OnCleanup(function()
 		yeti:Destroy()
@@ -2122,7 +2143,7 @@ function Event.Run(ev)
 
 	-- rise out of the snow
 	for i = 1, 30 do
-		yeti:PivotTo(facing * CFrame.new(0, -14 + 14 * (i / 30), 0))
+		root.CFrame = facing * CFrame.new(0, -14 + 14 * (i / 30), 0)
 		task.wait(1 / 30)
 	end
 
@@ -2158,24 +2179,24 @@ function Event.Run(ev)
 		end
 		flinch = math.max(0, flinch - dt * 5)
 		local stomp = math.abs(math.sin(os.clock() * 2)) * 0.5
-		yeti:PivotTo(facing * CFrame.Angles(0, yaw, 0) * CFrame.new(0, stomp, 0) * CFrame.Angles(-0.15 * flinch, 0, 0))
+		root.CFrame = facing * CFrame.Angles(0, yaw, 0) * CFrame.new(0, stomp, 0) * CFrame.Angles(-0.15 * flinch, 0, 0)
 	end
 
-	local finalCf = yeti:GetPivot()
+	local finalCf = root.CFrame
 	if won then
 		ev.SetBar(0, "The Yeti is down!")
 		ev.Announce("The Yeti is knocked out! Great throwing, everyone!", 4)
 		for i = 1, 40 do
-			yeti:PivotTo(finalCf * CFrame.Angles(-math.rad(85) * (i / 40), 0, 0))
+			root.CFrame = finalCf * CFrame.Angles(-math.rad(85) * (i / 40), 0, 0)
 			task.wait(1 / 30)
 		end
 		task.wait(1.5)
-		finalCf = yeti:GetPivot()
+		finalCf = root.CFrame
 	else
 		ev.Announce("The Yeti got away! It'll be back...", 4)
 	end
 	for i = 1, 45 do
-		yeti:PivotTo(finalCf * CFrame.new(0, -0.35 * i, 0))
+		root.CFrame = finalCf * CFrame.new(0, -0.35 * i, 0)
 		task.wait(1 / 30)
 	end
 	return won
@@ -3040,17 +3061,18 @@ local function spawnPresent(reward: (Player) -> number, notify: RemoteEvent)
 	-- invisible pickup box
 	local hitbox = Instance.new("Part")
 	hitbox.Name = "Pickup"
-	hitbox.Anchored = true
 	hitbox.CanCollide = false
 	hitbox.CanQuery = false
 	hitbox.Transparency = 1
 	hitbox.Size = Vector3.new(6, 7, 6)
+	hitbox.CFrame = CFrame.new(0, 3, 0)
 	hitbox.Parent = gift
+	local root = Models.Rig(gift) -- falls by moving just the Root
+	hitbox.CanTouch = true
 
 	local entry = { model = gift, hitbox = hitbox, target = spot, y = spot.Y + 120, spin = rng:NextNumber(0, 6), landedAt = nil, taken = false }
 	local function place()
-		gift:PivotTo(CFrame.new(spot.X, entry.y, spot.Z) * CFrame.Angles(0, entry.spin, 0))
-		hitbox.CFrame = CFrame.new(spot.X, entry.y + 3, spot.Z)
+		root.CFrame = CFrame.new(spot.X, entry.y, spot.Z) * CFrame.Angles(0, entry.spin, 0)
 	end
 	place()
 	entry.place = place
@@ -3161,6 +3183,11 @@ local snowColors = {
 	Color3.fromRGB(248, 250, 255),
 }
 
+-- Snow height is drawn in steps of DRAW_STEP studs, so a slowly regrowing tile only
+-- updates (and replicates to every player) a few times instead of every second.
+local DRAW_STEP = 0.25
+local drawn: { number } = table.create(N * N, -1)
+
 local function draw(k: number)
 	local p = parts[k]
 	if not p then
@@ -3168,11 +3195,17 @@ local function draw(k: number)
 	end
 	local u = units[k]
 	local h = u * UH
-	if u < 0.15 then
+	local level = if u < 0.15 then 0 else math.max(1, math.floor(h / DRAW_STEP + 0.5))
+	if level == drawn[k] then
+		return
+	end
+	drawn[k] = level
+	if level == 0 then
 		p.Transparency = 1
 		h = 0.05
 	else
 		p.Transparency = 0
+		h = if u >= MAX - 0.01 then MAX * UH else level * DRAW_STEP
 	end
 	local j = (k - 1) // N
 	local i = (k - 1) % N
@@ -3859,6 +3892,8 @@ function World.BuildHub(root: Instance)
 		local pivot = m:GetPivot()
 		local offset = Vector3.new(x, top, z) - Vector3.new(bcf.Position.X, bcf.Position.Y - bsize.Y / 2, bcf.Position.Z)
 		m:PivotTo(pivot + offset)
+		Models.NoShadows(m)
+		Models.Rig(m) -- the client spins it by moving just the Root
 		m.Name = "Item"
 		m:SetAttribute("SpinCentre", Vector3.new(x, top, z))
 		m.Parent = holder
@@ -3886,6 +3921,7 @@ function World.BuildHub(root: Instance)
 	local wheel = Models.BuildWheel(1.4)
 	wheel.Name = "SpinWheel"
 	wheel:PivotTo(CFrame.new(H.Wheel + Vector3.new(0, 5.7, 0.4)) * FACE_PLAZA)
+	Models.Rig(wheel) -- the client turns it by moving just the Root
 	wheel.Parent = hub
 	CollectionService:AddTag(wheel, "SpinWheel")
 	local pointer = Instance.new("WedgePart")
@@ -3977,6 +4013,39 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
+
+-- ---------------------------------------------------------------- guard against old copies
+-- If the place file still holds an older copy of this game's client script (for example
+-- from an earlier .rbxlx), both would run and the HUD would be drawn twice. Stop any other
+-- "Client" script and remove what it drew, and say where it was so it can be deleted.
+local function isStrayClient(inst: Instance): boolean
+	return inst ~= script and inst:IsA("LocalScript") and inst.Name == "Client"
+end
+local function stopStray(inst: Instance)
+	warn("[ClearTheSnow] Stopped an old copy of the client script at " .. inst:GetFullName()
+		.. ". Delete it in Studio (look in StarterPlayer > StarterPlayerScripts and StarterGui) so only Rojo's copy is left.")
+	inst.Enabled = false
+	inst:Destroy()
+end
+local function sweepStrays()
+	local localPlayer = Players.LocalPlayer
+	for _, root in { localPlayer:FindFirstChild("PlayerScripts"), localPlayer:FindFirstChild("PlayerGui"), localPlayer.Character } do
+		if root then
+			for _, d in root:GetDescendants() do
+				if isStrayClient(d) and not d:IsDescendantOf(script.Parent) then
+					stopStray(d)
+				end
+			end
+		end
+	end
+	for _, c in script.Parent:GetChildren() do
+		if isStrayClient(c) then
+			stopStray(c)
+		end
+	end
+end
+sweepStrays()
+task.delay(3, sweepStrays) -- catch copies that start a little later
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -4331,12 +4400,11 @@ local Tutorial = {}
 local card = new("Frame", {
 	Name = "TutorialCard",
 	BackgroundColor3 = C.panel,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 10),
 	Size = UDim2.fromOffset(480, 104),
+	LayoutOrder = 2, -- sits right under the event timer at the top of the screen
 	Visible = false,
 	ZIndex = 20,
-	Parent = gui,
+	Parent = Panels.top,
 }, { Theme.corner(16), Theme.pad(12), new("UIStroke", { Color = C.accent, Thickness = 3 }), new("UISizeConstraint", { MaxSize = Vector2.new(480, 104) }) })
 local stepText = label({ Text = "STEP 1 OF 4", Size = UDim2.new(1, -80, 0, 16), TextColor3 = C.accent, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = card })
 local titleText = label({ Text = "", Position = UDim2.fromOffset(0, 18), Size = UDim2.new(1, 0, 0, 30), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = card })
@@ -4710,20 +4778,20 @@ local Panels = require(script.Parent.Panels)
 local C, new, label = Theme.C, Theme.new, Theme.label
 
 local state = ReplicatedStorage:WaitForChild("EventState")
-local gui = Panels.gui
 
 local EventBar = {}
 
 local frame = new("Frame", {
 	Name = "EventBar",
 	BackgroundColor3 = C.panel,
-	BackgroundTransparency = 0.05,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 10),
+	BorderSizePixel = 0,
 	Size = UDim2.fromOffset(250, 34),
+	LayoutOrder = 1,
 	ZIndex = 18,
-	Parent = gui,
-}, { Theme.corner(12), new("UIStroke", { Color = C.accent, Thickness = 2, Transparency = 0.4 }) })
+	Parent = Panels.top,
+}, { Theme.corner(12) })
+-- square off the top corners so the bar sits flush against the top edge
+new("Frame", { BackgroundColor3 = C.panel, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 14), ZIndex = 18, Parent = frame })
 local title = label({ Text = "", Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 22), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 19, Parent = frame })
 local timer = label({ Text = "", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 6), Size = UDim2.fromOffset(70, 22), Font = Theme.TitleFont, TextColor3 = C.accent, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 19, Parent = frame })
 local bar = new("Frame", { BackgroundColor3 = Color3.fromRGB(10, 22, 44), Position = UDim2.fromOffset(12, 34), Size = UDim2.new(1, -24, 0, 24), ClipsDescendants = true, Visible = false, ZIndex = 19, Parent = frame }, { Theme.corner(10) })
@@ -4737,8 +4805,6 @@ end
 
 RunService.RenderStepped:Connect(function()
 	local now = Workspace:GetServerTimeNow()
-	local tutorial = gui:FindFirstChild("TutorialCard")
-	frame.Position = UDim2.new(0.5, 0, 0, if tutorial and tutorial.Visible then 124 else 10)
 	if state:GetAttribute("Phase") == "active" then
 		frame.Size = UDim2.fromOffset(420, 66)
 		title.Text = state:GetAttribute("Title") or "Event"
@@ -5011,24 +5077,27 @@ function Hud.refresh()
 	Hud.spinBadge.Text = tostring(spins)
 	autoLabel.Text = if player:GetAttribute("Auto") then "Auto: On" else "Auto: Off"
 
-	for _, c in boostsFrame:GetChildren() do
-		if c:IsA("TextLabel") then
-			c:Destroy()
-		end
-	end
+	-- boost timers: reuse one label per boost instead of rebuilding them every update
 	local now = Workspace:GetServerTimeNow()
-	for _, b in { { "BoostSell", "2x Sell", C.accent }, { "BoostCapacity", "2x Capacity", C.good } } do
+	for i, b in { { "BoostSell", "2x Sell", C.accent }, { "BoostCapacity", "2x Capacity", C.good } } do
 		local left = (player:GetAttribute(b[1]) or 0) - now
+		local tag = boostsFrame:FindFirstChild(b[1])
 		if left > 0 then
-			new("TextLabel", {
-				BackgroundColor3 = b[3],
-				Size = UDim2.fromOffset(170, 26),
-				Font = Theme.BoldFont,
-				TextScaled = true,
-				TextColor3 = C.ink,
-				Text = string.format("%s  %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60)),
-				Parent = boostsFrame,
-			}, { Theme.corner(8), Theme.pad(4) })
+			if not tag then
+				tag = new("TextLabel", {
+					Name = b[1],
+					LayoutOrder = i,
+					BackgroundColor3 = b[3],
+					Size = UDim2.fromOffset(170, 26),
+					Font = Theme.BoldFont,
+					TextScaled = true,
+					TextColor3 = C.ink,
+					Parent = boostsFrame,
+				}, { Theme.corner(8), Theme.pad(4) })
+			end
+			tag.Text = string.format("%s  %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60))
+		elseif tag then
+			tag:Destroy()
 		end
 	end
 	local hands = player:GetAttribute("Equipped") == "hands"
@@ -5063,6 +5132,23 @@ local player = Players.LocalPlayer
 
 local Panels = {}
 
+-- remove HUDs (and leftovers) drawn by an old copy of the client script, now and later
+local playerGui = player:WaitForChild("PlayerGui")
+local function removeOldGui(g: Instance)
+	if g:IsA("ScreenGui") and g.Name == "ClearTheSnowUI" and g ~= Panels.gui then
+		g:Destroy()
+	end
+end
+for _, g in playerGui:GetChildren() do
+	removeOldGui(g)
+end
+for _, name in { "PileArrow" } do
+	local old = Workspace:FindFirstChild(name)
+	if old then
+		old:Destroy()
+	end
+end
+
 Panels.gui = new("ScreenGui", {
 	Name = "ClearTheSnowUI",
 	ResetOnSpawn = false,
@@ -5070,6 +5156,36 @@ Panels.gui = new("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	Parent = player:WaitForChild("PlayerGui"),
 })
+playerGui.ChildAdded:Connect(function(g)
+	task.defer(removeOldGui, g)
+end)
+-- The strip at the very top of the screen (event timer, tutorial card). It ignores the
+-- top-bar inset so it sits flush against the top edge; items stack downward in order.
+Panels.topGui = new("ScreenGui", {
+	Name = "ClearTheSnowTop",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 2,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Parent = playerGui,
+})
+Panels.top = new("Frame", {
+	Name = "TopStack",
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.fromScale(0.5, 0),
+	Size = UDim2.fromOffset(480, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	Parent = Panels.topGui,
+}, {
+	new("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }),
+})
+for _, g in playerGui:GetChildren() do
+	if g:IsA("ScreenGui") and g.Name == "ClearTheSnowTop" and g ~= Panels.topGui then
+		g:Destroy()
+	end
+end
+
 Panels.isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local all: { [string]: Frame } = {}
@@ -5454,7 +5570,7 @@ task.spawn(function()
 		task.wait(1)
 		plazaWheel = CollectionService:GetTagged("SpinWheel")[1]
 	end
-	plazaBase = plazaWheel:GetPivot()
+	plazaBase = plazaWheel.PrimaryPart.CFrame
 end)
 
 local angle = 0 -- degrees, clockwise as you look at the wheel
@@ -5466,7 +5582,7 @@ local function setWheel(deg: number)
 		labels.Rotation = deg
 	end
 	if plazaWheel and plazaBase then
-		plazaWheel:PivotTo(plazaBase * rot)
+		plazaWheel.PrimaryPart.CFrame = plazaBase * rot
 	end
 end
 
@@ -5725,7 +5841,7 @@ new("ParticleEmitter", {
 	Size = NumberSequence.new(0.35),
 	Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 0.6) }),
 	Lifetime = NumberRange.new(8, 12),
-	Rate = 260,
+	Rate = 150,
 	Speed = NumberRange.new(5, 8),
 	SpreadAngle = Vector2.new(15, 15),
 	Acceleration = Vector3.new(0.6, 0, 0.3),
@@ -5761,8 +5877,8 @@ local function addTurntable(holder: Instance)
 	local item = holder:WaitForChild("Item", 10)
 	if item and item:IsA("Model") then
 		local centre = item:GetAttribute("SpinCentre")
-		local pivot = item:GetPivot()
-		table.insert(turntables, { model = item, centre = centre, offset = CFrame.new(centre):Inverse() * pivot, phase = #turntables })
+		local pivot = item.PrimaryPart.CFrame
+		table.insert(turntables, { root = item.PrimaryPart, centre = centre, offset = CFrame.new(centre):Inverse() * pivot, phase = #turntables })
 	end
 end
 for _, h in CollectionService:GetTagged("ToolDisplay") do
@@ -5779,16 +5895,18 @@ RunService.RenderStepped:Connect(function(dt)
 	local pile = player:GetAttribute("Pile") or 0
 	local h = math.min(9, 0.4 + math.log10(1 + pile) * 2.4)
 	local cur = mound.Size.Y
-	local y = cur + (h * 2 - cur) * math.min(1, dt * 4)
-	mound.Size = Vector3.new(H.PileRadius * 2, y, H.PileRadius * 2)
-	mound.CFrame = CFrame.new(H.Pile + Vector3.new(0, 0.3, 0))
+	if math.abs(h * 2 - cur) > 0.02 then -- only resize while it's actually growing
+		local y = cur + (h * 2 - cur) * math.min(1, dt * 4)
+		mound.Size = Vector3.new(H.PileRadius * 2, y, H.PileRadius * 2)
+		mound.CFrame = CFrame.new(H.Pile + Vector3.new(0, 0.3, 0))
+	end
 	-- turntables (throttled, only near the camera)
 	tAcc += dt
-	if tAcc > 1 / 30 then
+	if tAcc > 1 / 20 then
 		tAcc = 0
 		for _, tt in turntables do
 			if (cam.CFrame.Position - tt.centre).Magnitude < 90 then
-				tt.model:PivotTo(CFrame.new(tt.centre) * CFrame.Angles(0, t * 0.5 + tt.phase, 0) * tt.offset)
+				tt.root.CFrame = CFrame.new(tt.centre) * CFrame.Angles(0, t * 0.5 + tt.phase, 0) * tt.offset
 			end
 		end
 	end

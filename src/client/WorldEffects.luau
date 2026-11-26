@@ -51,7 +51,7 @@ new("ParticleEmitter", {
 	Size = NumberSequence.new(0.35),
 	Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 0.6) }),
 	Lifetime = NumberRange.new(8, 12),
-	Rate = 260,
+	Rate = 150,
 	Speed = NumberRange.new(5, 8),
 	SpreadAngle = Vector2.new(15, 15),
 	Acceleration = Vector3.new(0.6, 0, 0.3),
@@ -87,8 +87,8 @@ local function addTurntable(holder: Instance)
 	local item = holder:WaitForChild("Item", 10)
 	if item and item:IsA("Model") then
 		local centre = item:GetAttribute("SpinCentre")
-		local pivot = item:GetPivot()
-		table.insert(turntables, { model = item, centre = centre, offset = CFrame.new(centre):Inverse() * pivot, phase = #turntables })
+		local pivot = item.PrimaryPart.CFrame
+		table.insert(turntables, { root = item.PrimaryPart, centre = centre, offset = CFrame.new(centre):Inverse() * pivot, phase = #turntables })
 	end
 end
 for _, h in CollectionService:GetTagged("ToolDisplay") do
@@ -105,16 +105,18 @@ RunService.RenderStepped:Connect(function(dt)
 	local pile = player:GetAttribute("Pile") or 0
 	local h = math.min(9, 0.4 + math.log10(1 + pile) * 2.4)
 	local cur = mound.Size.Y
-	local y = cur + (h * 2 - cur) * math.min(1, dt * 4)
-	mound.Size = Vector3.new(H.PileRadius * 2, y, H.PileRadius * 2)
-	mound.CFrame = CFrame.new(H.Pile + Vector3.new(0, 0.3, 0))
+	if math.abs(h * 2 - cur) > 0.02 then -- only resize while it's actually growing
+		local y = cur + (h * 2 - cur) * math.min(1, dt * 4)
+		mound.Size = Vector3.new(H.PileRadius * 2, y, H.PileRadius * 2)
+		mound.CFrame = CFrame.new(H.Pile + Vector3.new(0, 0.3, 0))
+	end
 	-- turntables (throttled, only near the camera)
 	tAcc += dt
-	if tAcc > 1 / 30 then
+	if tAcc > 1 / 20 then
 		tAcc = 0
 		for _, tt in turntables do
 			if (cam.CFrame.Position - tt.centre).Magnitude < 90 then
-				tt.model:PivotTo(CFrame.new(tt.centre) * CFrame.Angles(0, t * 0.5 + tt.phase, 0) * tt.offset)
+				tt.root.CFrame = CFrame.new(tt.centre) * CFrame.Angles(0, t * 0.5 + tt.phase, 0) * tt.offset
 			end
 		end
 	end

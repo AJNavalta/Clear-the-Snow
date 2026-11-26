@@ -13,6 +13,23 @@ local player = Players.LocalPlayer
 
 local Panels = {}
 
+-- remove HUDs (and leftovers) drawn by an old copy of the client script, now and later
+local playerGui = player:WaitForChild("PlayerGui")
+local function removeOldGui(g: Instance)
+	if g:IsA("ScreenGui") and g.Name == "ClearTheSnowUI" and g ~= Panels.gui then
+		g:Destroy()
+	end
+end
+for _, g in playerGui:GetChildren() do
+	removeOldGui(g)
+end
+for _, name in { "PileArrow" } do
+	local old = Workspace:FindFirstChild(name)
+	if old then
+		old:Destroy()
+	end
+end
+
 Panels.gui = new("ScreenGui", {
 	Name = "ClearTheSnowUI",
 	ResetOnSpawn = false,
@@ -20,6 +37,36 @@ Panels.gui = new("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	Parent = player:WaitForChild("PlayerGui"),
 })
+playerGui.ChildAdded:Connect(function(g)
+	task.defer(removeOldGui, g)
+end)
+-- The strip at the very top of the screen (event timer, tutorial card). It ignores the
+-- top-bar inset so it sits flush against the top edge; items stack downward in order.
+Panels.topGui = new("ScreenGui", {
+	Name = "ClearTheSnowTop",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 2,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Parent = playerGui,
+})
+Panels.top = new("Frame", {
+	Name = "TopStack",
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.fromScale(0.5, 0),
+	Size = UDim2.fromOffset(480, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	Parent = Panels.topGui,
+}, {
+	new("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }),
+})
+for _, g in playerGui:GetChildren() do
+	if g:IsA("ScreenGui") and g.Name == "ClearTheSnowTop" and g ~= Panels.topGui then
+		g:Destroy()
+	end
+end
+
 Panels.isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local all: { [string]: Frame } = {}

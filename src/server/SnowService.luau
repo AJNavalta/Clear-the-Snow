@@ -38,6 +38,11 @@ local snowColors = {
 	Color3.fromRGB(248, 250, 255),
 }
 
+-- Snow height is drawn in steps of DRAW_STEP studs, so a slowly regrowing tile only
+-- updates (and replicates to every player) a few times instead of every second.
+local DRAW_STEP = 0.25
+local drawn: { number } = table.create(N * N, -1)
+
 local function draw(k: number)
 	local p = parts[k]
 	if not p then
@@ -45,11 +50,17 @@ local function draw(k: number)
 	end
 	local u = units[k]
 	local h = u * UH
-	if u < 0.15 then
+	local level = if u < 0.15 then 0 else math.max(1, math.floor(h / DRAW_STEP + 0.5))
+	if level == drawn[k] then
+		return
+	end
+	drawn[k] = level
+	if level == 0 then
 		p.Transparency = 1
 		h = 0.05
 	else
 		p.Transparency = 0
+		h = if u >= MAX - 0.01 then MAX * UH else level * DRAW_STEP
 	end
 	local j = (k - 1) // N
 	local i = (k - 1) % N

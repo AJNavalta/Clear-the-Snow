@@ -32,12 +32,11 @@ local Tutorial = {}
 local card = new("Frame", {
 	Name = "TutorialCard",
 	BackgroundColor3 = C.panel,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 10),
 	Size = UDim2.fromOffset(480, 104),
+	LayoutOrder = 2, -- sits right under the event timer at the top of the screen
 	Visible = false,
 	ZIndex = 20,
-	Parent = gui,
+	Parent = Panels.top,
 }, { Theme.corner(16), Theme.pad(12), new("UIStroke", { Color = C.accent, Thickness = 3 }), new("UISizeConstraint", { MaxSize = Vector2.new(480, 104) }) })
 local stepText = label({ Text = "STEP 1 OF 4", Size = UDim2.new(1, -80, 0, 16), TextColor3 = C.accent, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = card })
 local titleText = label({ Text = "", Position = UDim2.fromOffset(0, 18), Size = UDim2.new(1, 0, 0, 30), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = card })

@@ -376,6 +376,8 @@ function World.BuildHub(root: Instance)
 		local pivot = m:GetPivot()
 		local offset = Vector3.new(x, top, z) - Vector3.new(bcf.Position.X, bcf.Position.Y - bsize.Y / 2, bcf.Position.Z)
 		m:PivotTo(pivot + offset)
+		Models.NoShadows(m)
+		Models.Rig(m) -- the client spins it by moving just the Root
 		m.Name = "Item"
 		m:SetAttribute("SpinCentre", Vector3.new(x, top, z))
 		m.Parent = holder
@@ -403,6 +405,7 @@ function World.BuildHub(root: Instance)
 	local wheel = Models.BuildWheel(1.4)
 	wheel.Name = "SpinWheel"
 	wheel:PivotTo(CFrame.new(H.Wheel + Vector3.new(0, 5.7, 0.4)) * FACE_PLAZA)
+	Models.Rig(wheel) -- the client turns it by moving just the Root
 	wheel.Parent = hub
 	CollectionService:AddTag(wheel, "SpinWheel")
 	local pointer = Instance.new("WedgePart")
