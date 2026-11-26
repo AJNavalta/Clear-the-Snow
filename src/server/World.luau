@@ -252,43 +252,40 @@ local function prompt(parent: Instance, action: string, object: string, dist: nu
 	return pp
 end
 
-local function billboard(parent: Instance, title: string, subtitle: string, height: number, w: number?): (TextLabel, TextLabel)
+-- Small floating text above a tool on the display: name, then price / OWNED. It is sized in
+-- studs so it shrinks with distance and never covers its neighbours. The client makes the
+-- tool you point at (or stand next to) bigger and brighter.
+local function toolLabel(parent: Instance, title: string, subtitle: string, height: number)
 	local bb = Instance.new("BillboardGui")
-	bb.Size = UDim2.fromOffset(w or 180, 54)
+	bb.Name = "Label"
+	bb.Size = UDim2.fromScale(3.8, 1.1) -- studs
 	bb.StudsOffset = Vector3.new(0, height, 0)
 	bb.AlwaysOnTop = false
-	bb.MaxDistance = 90
+	bb.MaxDistance = 60
 	bb.LightInfluence = 0
 	bb.Parent = parent
-	local bg = Instance.new("Frame")
-	bg.Size = UDim2.fromScale(1, 1)
-	bg.BackgroundColor3 = Color3.fromRGB(15, 30, 55)
-	bg.BackgroundTransparency = 0.18
-	bg.Parent = bb
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = bg
 	local t = Instance.new("TextLabel")
 	t.Name = "Title"
-	t.Size = UDim2.new(1, -8, 0.55, 0)
-	t.Position = UDim2.fromOffset(4, 2)
+	t.Size = UDim2.fromScale(1, 0.58)
 	t.BackgroundTransparency = 1
-	t.Font = Enum.Font.FredokaOne
+	t.Font = Enum.Font.GothamBold
 	t.TextScaled = true
 	t.TextColor3 = Color3.new(1, 1, 1)
+	t.TextStrokeTransparency = 0.35
 	t.Text = title
-	t.Parent = bg
+	t.Parent = bb
 	local s = Instance.new("TextLabel")
 	s.Name = "Subtitle"
-	s.Size = UDim2.new(1, -8, 0.38, 0)
-	s.Position = UDim2.new(0, 4, 0.58, 0)
+	s.Position = UDim2.fromScale(0, 0.6)
+	s.Size = UDim2.fromScale(1, 0.4)
 	s.BackgroundTransparency = 1
 	s.Font = Enum.Font.GothamBold
 	s.TextScaled = true
 	s.TextColor3 = Color3.fromHex("#ffd54f")
+	s.TextStrokeTransparency = 0.35
 	s.Text = subtitle
-	s.Parent = bg
-	return t, s
+	s.Parent = bb
+	return bb
 end
 
 function World.BuildHub(root: Instance)
@@ -311,7 +308,6 @@ function World.BuildHub(root: Instance)
 		npc:PivotTo(CFrame.new(pos + Vector3.new(0, 0, 0.15 * S)) * FACE_PLAZA)
 		npc.Parent = hub
 		local anchor = part(hub, Vector3.new(4, 4, 1), CFrame.new(pos + Vector3.new(0, 4, 1.4 * S)), "#000000", nil, { Transparency = 1, CanCollide = false, Name = sign .. "Prompt" })
-		billboard(anchor, title, sub, 8.5, 220)
 		return anchor, npc
 	end
 	local sellAnchor, sellNpc = stall(H.Sell, "#1e88e5", "#e3f2fd", "SNOW BUYER", { "#1565c0", "#f9a825", "#e3f2fd" }, "SNOW BUYER", Config.SNOW_VALUE .. " coin per snow")
@@ -332,7 +328,6 @@ function World.BuildHub(root: Instance)
 		end
 	end
 	local pileBase = part(hub, Vector3.new(0.4, H.PileRadius * 2, H.PileRadius * 2), CFrame.new(H.Pile + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.pi / 2), "#dfe8f3", Enum.Material.Snow, { Name = "PileBase", Shape = Enum.PartType.Cylinder, CanCollide = false })
-	billboard(pileBase, "SNOW PILE", "Toss your snow here", 9, 200)
 	out.PileBase = pileBase
 
 	-- tool display: 20 items on 4 tight tiers right beside the shop stall
@@ -347,8 +342,6 @@ function World.BuildHub(root: Instance)
 		part(displayFolder, Vector3.new(width, hgt, sz), CFrame.new(o.X + width / 2 - 0.6, hgt / 2, z), "#e8e2d6", Enum.Material.Marble, { CanCollide = true })
 		part(displayFolder, Vector3.new(width, 0.2, 0.2), CFrame.new(o.X + width / 2 - 0.6, hgt, z + sz / 2 - 0.1), "#c62828")
 	end
-	local banner = part(displayFolder, Vector3.new(1, 1, 1), CFrame.new(o.X + width / 2, 12, o.Z + 1), "#000000", nil, { Transparency = 1, CanCollide = false })
-	billboard(banner, "TOOLS & MACHINES", "Walk up or click one", 0, 240)
 
 	out.Displays = {}
 	for i, tool in Config.Tools do
@@ -388,9 +381,7 @@ function World.BuildHub(root: Instance)
 		click.Parent = hit
 		local pp = prompt(hit, "Inspect", tool.name, 7)
 		pp.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-		local title, sub = billboard(hit, tool.name, Config.FormatNumber(tool.price) .. " coins", bsize.Y / 2 + 1.4, 150)
-		title.Name = "Title"
-		sub.Name = "Subtitle"
+		toolLabel(hit, tool.name, Config.FormatNumber(tool.price) .. " coins", bsize.Y + 0.9 - hit.Size.Y / 2) -- just above the tool
 		holder.Parent = displayFolder
 		CollectionService:AddTag(holder, "ToolDisplay")
 		table.insert(out.Displays, { id = tool.id, click = click, prompt = pp })
@@ -415,7 +406,6 @@ function World.BuildHub(root: Instance)
 	pointer.CFrame = CFrame.new(H.Wheel + Vector3.new(0, 10.2, 0.6)) * CFrame.Angles(math.pi, 0, 0) * CFrame.Angles(0, math.pi / 2, 0)
 	pointer.Parent = hub
 	local wheelAnchor = part(hub, Vector3.new(4, 4, 1), CFrame.new(H.Wheel + Vector3.new(0, 4, 2)), "#000000", nil, { Transparency = 1, CanCollide = false, Name = "WheelPrompt" })
-	billboard(wheelAnchor, "LUCKY SPIN", "Free spin every day!", 9, 220)
 	out.WheelPrompt = prompt(wheelAnchor, "Spin the wheel", "Lucky Spin")
 	local wclick = Instance.new("ClickDetector")
 	wclick.MaxActivationDistance = 80
@@ -429,7 +419,6 @@ function World.BuildHub(root: Instance)
 	gift.Parent = hub
 	CollectionService:AddTag(gift, "Gift")
 	local giftAnchor = part(hub, Vector3.new(3.6, 3.6, 3.6), CFrame.new(H.Gift + Vector3.new(0, 1.8, 0)), "#000000", nil, { Transparency = 1, CanCollide = true, Name = "GiftPrompt" })
-	billboard(giftAnchor, "DAILY REWARD", "Claim every day", 4.5, 200)
 	out.GiftPrompt = prompt(giftAnchor, "Claim daily reward", "Gift")
 	local gclick = Instance.new("ClickDetector")
 	gclick.MaxActivationDistance = 80
