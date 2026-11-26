@@ -130,6 +130,29 @@ Config.Tutorial = {
 	StarterBonus = true, -- first sale tops coins up so a new player can afford the trowel
 }
 
+-- Snowball fights: with Bare Hands equipped, press Q (or tap THROW) to throw a snowball.
+-- A hit stuns the other player briefly with a stumble.
+Config.Snowball = {
+	Cooldown = 0.8, -- seconds between throws
+	Speed = 90, -- studs per second
+	Gravity = 40, -- studs per second squared (lower than world gravity for a nice arc)
+	MaxFlightTime = 2.5, -- seconds before a snowball melts away
+	StunSeconds = 0.5, -- how long a hit player can't move
+	ImmuneSeconds = 1.0, -- after a stun ends, how long before you can be stunned again
+	Radius = 0.45, -- snowball size (studs)
+}
+
+-- Christmas presents that drop from the sky. Walk into one to open it for bonus coins.
+Config.Presents = {
+	Interval = { 40, 80 }, -- seconds between drops (random in this range)
+	PerDrop = { 2, 4 }, -- presents per drop
+	MaxOnMap = 8,
+	FallSpeed = 18, -- studs per second
+	Lifetime = 120, -- seconds a landed present waits before vanishing
+	MinCoins = 15,
+	ProgressShare = 0.15, -- coins = this share of your next upgrade's price (at least MinCoins)
+}
+
 -- Market layout (studs). The hub sits in the plaza at the centre of town.
 Config.Hub = {
 	Spawn = Vector3.new(0, 0, 6),
@@ -1510,6 +1533,8 @@ local Models = require(Shared.Models)
 local World = require(script.Parent.World)
 local SnowService = require(script.Parent.SnowService)
 local DataService = require(script.Parent.DataService)
+local SnowballService = require(script.Parent.SnowballService)
+local PresentService = require(script.Parent.PresentService)
 
 local H = Config.Hub
 
@@ -1537,7 +1562,6 @@ local ClaimDaily = remoteFunction("ClaimDaily")
 local Spin = remoteFunction("Spin")
 local SellPile = remoteFunction("SellPile")
 local TutorialAction = remoteEvent("TutorialAction")
-remotes.Parent = ReplicatedStorage
 
 -- ------------------------------------------------------------------ world
 local blocks, hub = World.Build()
@@ -1654,6 +1678,37 @@ type Runtime = {
 	busy: boolean,
 }
 local runtime: { [Player]: Runtime } = {}
+
+-- ------------------------------------------------------------------ snowballs and presents
+SnowballService.Init(remotes, {
+	-- only with Bare Hands equipped
+	canThrow = function(player)
+		local d = DataService.Get(player)
+		return d ~= nil and d.equipped == "hands"
+	end,
+	onStun = function(player)
+		local r = runtime[player]
+		if r then
+			r.scooping = false
+		end
+	end,
+	walkSpeed = function(player)
+		local d = DataService.Get(player)
+		return Config.GetTool(if d then d.equipped else "hands").speed
+	end,
+})
+PresentService.Init(Notify, function(player)
+	-- coins for picking up a present: scales with your next upgrade
+	local d = DataService.Get(player)
+	if not d then
+		return 0
+	end
+	local coins = math.max(Config.Presents.MinCoins, math.floor(progressCoins(d) * Config.Presents.ProgressShare + 0.5))
+	d.coins += coins
+	publish(player)
+	return coins
+end)
+remotes.Parent = ReplicatedStorage
 
 function publish(player: Player)
 	local d = DataService.Get(player)
@@ -2188,6 +2243,179 @@ end)
       </Item>
       <Item class="ModuleScript" referent="8">
         <Properties>
+          <string name="Name">PresentService</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Christmas presents that drop from the sky every now and then. Each one floats down
+-- under a little parachute glow, lands somewhere in town, and the first player to walk
+-- into it gets bonus coins. Tuning: Config.Presents.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local P = Config.Presents
+
+local PresentService = {}
+
+local WRAPS = {
+	{ "#c62828", "#ffd54f" },
+	{ "#2e7d32", "#ffffff" },
+	{ "#1565c0", "#e0e0e0" },
+	{ "#8e24aa", "#ffd54f" },
+	{ "#ef6c00", "#c62828" },
+}
+
+local folder: Folder
+local live = {}
+local rng = Random.new()
+
+-- a spot on open ground (not a roof, not the market), or nil
+local function findSpot(): Vector3?
+	local half = Config.WORLD_SIZE / 2 * 0.85
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { folder }
+	for _ = 1, 15 do
+		local x, z = rng:NextNumber(-half, half), rng:NextNumber(-half, half)
+		local nearMarket = math.abs(x) < 45 and z > -40 and z < 15
+		if not nearMarket then
+			local hit = Workspace:Raycast(Vector3.new(x, 150, z), Vector3.new(0, -300, 0), params)
+			if hit and hit.Position.Y < 2 and not (hit.Instance.Parent and hit.Instance.Parent:FindFirstChildOfClass("Humanoid")) then
+				return hit.Position
+			end
+		end
+	end
+	return nil
+end
+
+local function spawnPresent(reward: (Player) -> number, notify: RemoteEvent)
+	local spot = findSpot()
+	if not spot then
+		return
+	end
+	local gift = Models.BuildGift()
+	local wrap = WRAPS[rng:NextInteger(1, #WRAPS)]
+	for _, p in gift:GetDescendants() do
+		if p:IsA("BasePart") and p.Name ~= "Root" then
+			p.Color = if p.Material == Enum.Material.Metal then Color3.fromHex(wrap[2]) else Color3.fromHex(wrap[1])
+			p.CanCollide = false
+			p.CanQuery = false
+		end
+	end
+	gift.Name = "Present"
+	-- glow so it can be spotted from a distance
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromHex("#ffe9a8")
+	light.Range = 14
+	light.Brightness = 2
+	light.Parent = gift.PrimaryPart
+	local sparkle = Instance.new("Sparkles")
+	sparkle.SparkleColor = Color3.fromHex("#fff3c4")
+	sparkle.Parent = gift.PrimaryPart
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(120, 30)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, 5.5, 0)
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = 160
+	bb.LightInfluence = 0
+	local tl = Instance.new("TextLabel")
+	tl.BackgroundTransparency = 1
+	tl.Size = UDim2.fromScale(1, 1)
+	tl.Font = Enum.Font.FredokaOne
+	tl.TextScaled = true
+	tl.Text = "PRESENT"
+	tl.TextColor3 = Color3.fromHex("#ffd54f")
+	tl.TextStrokeTransparency = 0.2
+	tl.Parent = bb
+	bb.Parent = gift.PrimaryPart
+
+	-- invisible pickup box
+	local hitbox = Instance.new("Part")
+	hitbox.Name = "Pickup"
+	hitbox.Anchored = true
+	hitbox.CanCollide = false
+	hitbox.CanQuery = false
+	hitbox.Transparency = 1
+	hitbox.Size = Vector3.new(6, 7, 6)
+	hitbox.Parent = gift
+
+	local entry = { model = gift, hitbox = hitbox, target = spot, y = spot.Y + 120, spin = rng:NextNumber(0, 6), landedAt = nil, taken = false }
+	local function place()
+		gift:PivotTo(CFrame.new(spot.X, entry.y, spot.Z) * CFrame.Angles(0, entry.spin, 0))
+		hitbox.CFrame = CFrame.new(spot.X, entry.y + 3, spot.Z)
+	end
+	place()
+	entry.place = place
+	gift.Parent = folder
+
+	hitbox.Touched:Connect(function(other)
+		if entry.taken then
+			return
+		end
+		local player = Players:GetPlayerFromCharacter(other.Parent)
+		local hum = other.Parent and other.Parent:FindFirstChildOfClass("Humanoid")
+		if not player or not hum or hum.Health <= 0 then
+			return
+		end
+		entry.taken = true
+		local coins = reward(player)
+		notify:FireClient(player, "present", coins)
+		gift:Destroy()
+	end)
+	table.insert(live, entry)
+end
+
+function PresentService.Init(notify: RemoteEvent, reward: (Player) -> number)
+	folder = Instance.new("Folder")
+	folder.Name = "Presents"
+	folder.Parent = Workspace
+
+	-- falling and cleanup
+	RunService.Heartbeat:Connect(function(dt)
+		local now = os.clock()
+		for i = #live, 1, -1 do
+			local e = live[i]
+			if e.taken or not e.model.Parent then
+				table.remove(live, i)
+			elseif not e.landedAt then
+				e.y = math.max(e.target.Y, e.y - P.FallSpeed * dt)
+				e.spin += dt * 1.2
+				e.place()
+				if e.y <= e.target.Y then
+					e.landedAt = now
+				end
+			elseif now - e.landedAt > P.Lifetime then
+				e.model:Destroy()
+				table.remove(live, i)
+			end
+		end
+	end)
+
+	-- drops
+	task.spawn(function()
+		while true do
+			task.wait(rng:NextNumber(P.Interval[1], P.Interval[2]))
+			if #Players:GetPlayers() > 0 and #live < P.MaxOnMap then
+				local n = math.min(rng:NextInteger(P.PerDrop[1], P.PerDrop[2]), P.MaxOnMap - #live)
+				for _ = 1, n do
+					spawnPresent(reward, notify)
+				end
+				notify:FireAllClients("toast", "Presents are falling from the sky! Grab them for bonus coins.", 3.5)
+			end
+		end
+	end)
+end
+
+return PresentService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
           <string name="Name">SnowService</string>
           <string name="Source"><![CDATA[--!strict
 -- Harvestable snow that grows back. The town is split into square tiles; each tile
@@ -2367,7 +2595,137 @@ return SnowService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">SnowballService</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Snowball fights. With Bare Hands equipped a player can throw snowballs. The server
+-- flies each snowball itself (raycasting along its arc) and decides hits, so clients
+-- can't fake them. Every client draws the snowball and the stumble. Tuning: Config.Snowball.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local SB = Config.Snowball
+
+local SnowballService = {}
+
+-- canThrow(player) -> boolean ; onStun(player, seconds) ; walkSpeed(player) -> number
+function SnowballService.Init(remotes: Folder, hooks)
+	local throwRemote = Instance.new("RemoteEvent")
+	throwRemote.Name = "ThrowSnowball"
+	throwRemote.Parent = remotes
+	local fx = Instance.new("RemoteEvent") -- to all clients: "throw" and "stun"
+	fx.Name = "SnowballFx"
+	fx.Parent = remotes
+
+	local lastThrow: { [Player]: number } = {}
+	local stunnedUntil: { [Player]: number } = {}
+	local flying = {}
+
+	local function stun(victim: Player, thrower: Player)
+		local now = os.clock()
+		if (stunnedUntil[victim] or 0) + SB.ImmuneSeconds > now then
+			return -- still stunned or briefly immune, so nobody gets stun-locked
+		end
+		local char = victim.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then
+			return
+		end
+		stunnedUntil[victim] = now + SB.StunSeconds
+		hooks.onStun(victim, SB.StunSeconds)
+		hum.WalkSpeed = 0
+		hum.JumpPower = 0
+		hum.JumpHeight = 0
+		fx:FireAllClients("stun", char, SB.StunSeconds, thrower.Name, victim)
+		task.delay(SB.StunSeconds, function()
+			if hum.Parent and stunnedUntil[victim] and stunnedUntil[victim] <= os.clock() + 0.01 then
+				hum.WalkSpeed = hooks.walkSpeed(victim)
+				hum.JumpPower = 50
+				hum.JumpHeight = 7.2
+			end
+		end)
+	end
+
+	function SnowballService.IsStunned(player: Player): boolean
+		return (stunnedUntil[player] or 0) > os.clock()
+	end
+
+	throwRemote.OnServerEvent:Connect(function(player, dir)
+		if typeof(dir) ~= "Vector3" or dir.Magnitude < 0.1 or dir.Magnitude ~= dir.Magnitude or dir.Magnitude > 1e4 then
+			return
+		end
+		local now = os.clock()
+		if now - (lastThrow[player] or 0) < SB.Cooldown or SnowballService.IsStunned(player) or not hooks.canThrow(player) then
+			return
+		end
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hrp or not hum or hum.Health <= 0 then
+			return
+		end
+		lastThrow[player] = now
+		dir = dir.Unit
+		local hand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
+		local origin = (if hand then hand.Position else hrp.Position + Vector3.new(0, 1.5, 0)) + dir * 1.5
+		local velocity = dir * SB.Speed + Vector3.new(0, SB.Speed * 0.08, 0)
+		-- throw animation: the default Animate script plays its tool swing on this value
+		local tool = char:FindFirstChildOfClass("Tool")
+		if tool then
+			local anim = Instance.new("StringValue")
+			anim.Name = "toolanim"
+			anim.Value = "Slash"
+			anim.Parent = tool
+			task.delay(0.5, function()
+				anim:Destroy()
+			end)
+		end
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { char }
+		table.insert(flying, { thrower = player, pos = origin, vel = velocity, t = 0, params = params })
+		fx:FireAllClients("throw", player, origin, velocity, Workspace:GetServerTimeNow())
+	end)
+
+	RunService.Heartbeat:Connect(function(dt)
+		for i = #flying, 1, -1 do
+			local b = flying[i]
+			b.t += dt
+			local vel = b.vel + Vector3.new(0, -SB.Gravity * dt, 0)
+			local step = (b.vel + vel) * 0.5 * dt
+			b.vel = vel
+			local hit = Workspace:Spherecast(b.pos, SB.Radius, step, b.params)
+			if hit then
+				table.remove(flying, i)
+				local model = hit.Instance:FindFirstAncestorOfClass("Model")
+				local victim = model and Players:GetPlayerFromCharacter(model)
+				if victim and victim ~= b.thrower then
+					stun(victim, b.thrower)
+				end
+			elseif b.t > SB.MaxFlightTime then
+				table.remove(flying, i)
+			else
+				b.pos += step
+			end
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(p)
+		lastThrow[p] = nil
+		stunnedUntil[p] = nil
+	end)
+end
+
+return SnowballService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">World</string>
           <string name="Source"><![CDATA[--!nonstrict
@@ -2831,19 +3189,19 @@ return World
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="10">
+  <Item class="StarterPlayer" referent="12">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="11">
+    <Item class="StarterPlayerScripts" referent="13">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="12">
+      <Item class="Folder" referent="14">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="13">
+        <Item class="LocalScript" referent="15">
           <Properties>
             <string name="Name">Client</string>
             <string name="Source"><![CDATA[--!nonstrict
@@ -2858,6 +3216,7 @@ return World
 --   UI/SpinPanel.luau   lucky spin wheel
 --   UI/HelpPanel.luau   how to play
 --   Tutorial.luau       step-by-step tutorial with arrows
+--   Snowballs.luau      snowball throwing (Bare Hands), flight visuals, stumble
 --   WorldEffects.luau   pile mound, snowfall, display labels and turntables
 
 local Players = game:GetService("Players")
@@ -2876,6 +3235,7 @@ local Daily = require(UI.DailyPanel)
 local Spin = require(UI.SpinPanel)
 local Help = require(UI.HelpPanel)
 require(script.Parent:WaitForChild("Tutorial"))
+require(script.Parent:WaitForChild("Snowballs"))
 local WorldEffects = require(script.Parent:WaitForChild("WorldEffects"))
 
 local player = Players.LocalPlayer
@@ -2969,6 +3329,9 @@ Remotes.Notify.OnClientEvent:Connect(function(kind, a, b)
 		end
 	elseif kind == "dumped" then
 		Hud.floater("+" .. fmt(a) .. " snow on the pile", Color3.new(1, 1, 1))
+	elseif kind == "present" then
+		Hud.floater("Present! +" .. fmt(a) .. " coins", Color3.fromHex("#ffd54f"))
+		Hud.toast("You opened a present: +" .. fmt(a) .. " coins!", 2.5)
 	elseif kind == "sold" then
 		Hud.floater("+" .. fmt(a) .. " coins")
 	elseif kind == "full" then
@@ -2988,7 +3351,191 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="16">
+          <Properties>
+            <string name="Name">Snowballs</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Snowball fights on the client: Q (or the THROW button on touch screens) throws a
+-- snowball while Bare Hands are equipped. The server decides hits; this script draws
+-- every snowball in flight and the stumble when someone gets hit.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Theme = require(script.Parent.UI.Theme)
+local Panels = require(script.Parent.UI.Panels)
+local Hud = require(script.Parent.UI.Hud)
+local SB = Config.Snowball
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local ThrowRemote = Remotes:WaitForChild("ThrowSnowball")
+local Fx = Remotes:WaitForChild("SnowballFx")
+
+local Snowballs = {}
+
+local function hasHands(): boolean
+	return player:GetAttribute("Equipped") == "hands"
+end
+
+-- ---------------------------------------------------------------- throwing
+local lastThrow = 0
+local function throw()
+	if not hasHands() or os.clock() - lastThrow < SB.Cooldown then
+		return
+	end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return
+	end
+	lastThrow = os.clock()
+	local dir
+	if Panels.isTouch then
+		dir = Workspace.CurrentCamera.CFrame.LookVector
+	else
+		dir = mouse.Hit.Position - (hrp.Position + Vector3.new(0, 1.5, 0))
+	end
+	if dir.Magnitude < 0.1 then
+		dir = hrp.CFrame.LookVector
+	end
+	ThrowRemote:FireServer(dir.Unit)
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed and input.KeyCode == Enum.KeyCode.Q then
+		throw()
+	end
+end)
+
+local throwBtn
+if Panels.isTouch then
+	throwBtn = Theme.button({
+		Text = "THROW",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -16, 1, -214),
+		Size = UDim2.fromOffset(84, 84),
+		BackgroundColor3 = Color3.fromRGB(240, 246, 255),
+		Visible = false,
+		Parent = Panels.gui,
+	})
+	throwBtn:FindFirstChildOfClass("UICorner").CornerRadius = UDim.new(1, 0)
+	throwBtn.Activated:Connect(throw)
+end
+local function refreshButton()
+	if throwBtn then
+		throwBtn.Visible = hasHands()
+	end
+end
+player:GetAttributeChangedSignal("Equipped"):Connect(refreshButton)
+refreshButton()
+
+-- ---------------------------------------------------------------- snowballs in flight
+local function flyBall(origin: Vector3, velocity: Vector3, thrower: Player)
+	local ball = Instance.new("Part")
+	ball.Shape = Enum.PartType.Ball
+	ball.Size = Vector3.new(1, 1, 1) * SB.Radius * 2
+	ball.Material = Enum.Material.Snow
+	ball.Color = Color3.fromRGB(248, 251, 255)
+	ball.Anchored = true
+	ball.CanCollide = false
+	ball.CanQuery = false
+	ball.CanTouch = false
+	ball.CastShadow = false
+	ball.Parent = Workspace
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { ball, thrower.Character }
+	local pos, vel, t = origin, velocity, 0
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		t += dt
+		local nv = vel + Vector3.new(0, -SB.Gravity * dt, 0)
+		local step = (vel + nv) * 0.5 * dt
+		vel = nv
+		local hit = Workspace:Raycast(pos, step, params)
+		if hit or t > SB.MaxFlightTime then
+			conn:Disconnect()
+			if hit then
+				-- little puff of snow
+				local puff = Instance.new("Part")
+				puff.Shape = Enum.PartType.Ball
+				puff.Anchored, puff.CanCollide, puff.CanQuery, puff.CanTouch = true, false, false, false
+				puff.Material = Enum.Material.Snow
+				puff.Color = ball.Color
+				puff.Size = Vector3.new(2.2, 2.2, 2.2)
+				puff.CFrame = CFrame.new(hit.Position)
+				puff.Transparency = 0.3
+				puff.Parent = Workspace
+				game:GetService("TweenService"):Create(puff, TweenInfo.new(0.35), { Size = Vector3.new(3.6, 3.6, 3.6), Transparency = 1 }):Play()
+				game:GetService("Debris"):AddItem(puff, 0.4)
+			end
+			ball:Destroy()
+			return
+		end
+		pos += step
+		ball.CFrame = CFrame.new(pos)
+	end)
+end
+
+-- ---------------------------------------------------------------- stumble
+-- Tips the character's root joint back and forth for the stun time. Every client runs
+-- this for the stunned character, so everyone sees the stumble.
+local function stumble(char: Model, seconds: number)
+	local joint = (char:FindFirstChild("LowerTorso") and char.LowerTorso:FindFirstChild("Root"))
+		or (char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart:FindFirstChild("RootJoint"))
+	if not joint or not joint:IsA("Motor6D") then
+		return
+	end
+	local isR6 = joint.Name == "RootJoint"
+	local t0 = os.clock()
+	local total = seconds + 0.25
+	local conn
+	conn = RunService.Stepped:Connect(function()
+		local k = (os.clock() - t0) / total
+		if k >= 1 or not joint.Parent then
+			conn:Disconnect()
+			return
+		end
+		local fade = math.sin(k * math.pi)
+		local back = math.rad(-28) * fade -- lean back from the hit
+		local wobble = math.rad(14) * math.sin(k * math.pi * 4) * fade
+		local tilt = if isR6 then CFrame.Angles(-back, wobble, 0) else CFrame.Angles(back, 0, wobble)
+		joint.Transform = joint.Transform * tilt
+	end)
+end
+
+Fx.OnClientEvent:Connect(function(kind, a, b, c, d, e)
+	if kind == "throw" then
+		local thrower, origin, velocity, sentAt = a, b, c, d
+		if typeof(origin) == "Vector3" and typeof(velocity) == "Vector3" and thrower then
+			-- skip ahead by the network delay so the ball lines up with the server's
+			local lag = math.clamp(Workspace:GetServerTimeNow() - (sentAt or 0), 0, 0.3)
+			flyBall(origin + velocity * lag, velocity, thrower)
+		end
+	elseif kind == "stun" then
+		local char, seconds, throwerName, victim = a, b, c, d
+		if typeof(char) == "Instance" then
+			stumble(char, seconds)
+		end
+		if victim == player then
+			Hud.toast("Splat! " .. tostring(throwerName) .. " hit you with a snowball!", 1.6)
+		elseif throwerName == player.Name and victim then
+			Hud.floater("Direct hit on " .. victim.DisplayName .. "!", Color3.new(1, 1, 1))
+		end
+	end
+end)
+
+return Snowballs
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">Tutorial</string>
             <string name="Source"><![CDATA[--!nonstrict
@@ -3294,11 +3841,11 @@ return Tutorial
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="15">
+        <Item class="Folder" referent="18">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="16">
+          <Item class="ModuleScript" referent="19">
             <Properties>
               <string name="Name">DailyPanel</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -3387,7 +3934,7 @@ return Daily
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="17">
+          <Item class="ModuleScript" referent="20">
             <Properties>
               <string name="Name">HelpPanel</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -3440,7 +3987,7 @@ return Help
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="18">
+          <Item class="ModuleScript" referent="21">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -3654,6 +4201,12 @@ function Hud.refresh()
 			}, { Theme.corner(8), Theme.pad(4) })
 		end
 	end
+	local hands = player:GetAttribute("Equipped") == "hands"
+	if Panels.isTouch then
+		hint.Text = if hands then "Hold SCOOP in the snow  |  THROW a snowball" else "Hold SCOOP in the snow"
+	else
+		hint.Text = "Hold click or F to scoop  |  R = auto-scoop" .. (if hands then "  |  Q = throw snowball" else "")
+	end
 	hint.Visible = not Panels.isTouch or not player:GetAttribute("Auto")
 end
 
@@ -3661,7 +4214,7 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="19">
+          <Item class="ModuleScript" referent="22">
             <Properties>
               <string name="Name">Panels</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -3755,7 +4308,7 @@ return Panels
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="20">
+          <Item class="ModuleScript" referent="23">
             <Properties>
               <string name="Name">ShopPanel</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -3963,7 +4516,7 @@ return Shop
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="21">
+          <Item class="ModuleScript" referent="24">
             <Properties>
               <string name="Name">SpinPanel</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -4141,7 +4694,7 @@ return Spin
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="22">
+          <Item class="ModuleScript" referent="25">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--!nonstrict
@@ -4285,7 +4838,7 @@ return Theme
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">WorldEffects</string>
             <string name="Source"><![CDATA[--!nonstrict

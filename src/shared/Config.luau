@@ -118,6 +118,29 @@ Config.Tutorial = {
 	StarterBonus = true, -- first sale tops coins up so a new player can afford the trowel
 }
 
+-- Snowball fights: with Bare Hands equipped, press Q (or tap THROW) to throw a snowball.
+-- A hit stuns the other player briefly with a stumble.
+Config.Snowball = {
+	Cooldown = 0.8, -- seconds between throws
+	Speed = 90, -- studs per second
+	Gravity = 40, -- studs per second squared (lower than world gravity for a nice arc)
+	MaxFlightTime = 2.5, -- seconds before a snowball melts away
+	StunSeconds = 0.5, -- how long a hit player can't move
+	ImmuneSeconds = 1.0, -- after a stun ends, how long before you can be stunned again
+	Radius = 0.45, -- snowball size (studs)
+}
+
+-- Christmas presents that drop from the sky. Walk into one to open it for bonus coins.
+Config.Presents = {
+	Interval = { 40, 80 }, -- seconds between drops (random in this range)
+	PerDrop = { 2, 4 }, -- presents per drop
+	MaxOnMap = 8,
+	FallSpeed = 18, -- studs per second
+	Lifetime = 120, -- seconds a landed present waits before vanishing
+	MinCoins = 15,
+	ProgressShare = 0.15, -- coins = this share of your next upgrade's price (at least MinCoins)
+}
+
 -- Market layout (studs). The hub sits in the plaza at the centre of town.
 Config.Hub = {
 	Spawn = Vector3.new(0, 0, 6),

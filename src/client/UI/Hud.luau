@@ -209,6 +209,12 @@ function Hud.refresh()
 			}, { Theme.corner(8), Theme.pad(4) })
 		end
 	end
+	local hands = player:GetAttribute("Equipped") == "hands"
+	if Panels.isTouch then
+		hint.Text = if hands then "Hold SCOOP in the snow  |  THROW a snowball" else "Hold SCOOP in the snow"
+	else
+		hint.Text = "Hold click or F to scoop  |  R = auto-scoop" .. (if hands then "  |  Q = throw snowball" else "")
+	end
 	hint.Visible = not Panels.isTouch or not player:GetAttribute("Auto")
 end
 

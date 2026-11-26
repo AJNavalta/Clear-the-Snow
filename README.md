@@ -50,6 +50,8 @@ Save the place in Studio to keep those.
 | Snow regrowth speed, sell price | `src/shared/Config.luau` (top of file) |
 | Daily rewards, spin wheel prizes and odds | `src/shared/Config.luau` |
 | Tutorial steps and text | `src/shared/Config.luau` (`Config.Tutorial`) |
+| Snowball cooldown, speed, stun time | `src/shared/Config.luau` (`Config.Snowball`) |
+| How often presents drop and what they pay | `src/shared/Config.luau` (`Config.Presents`) |
 | Where the market, pile, shop and wheel stand | `src/shared/Config.luau` (`Config.Hub`) |
 | UI colours and fonts | `src/client/UI/Theme.luau` |
 | A tool's or machine's 3D model | `src/shared/Models.luau` |
@@ -66,6 +68,10 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 - Walk up to the tool display and press **E**, or click a tool, to open it in the shopping list.
 - New players get a hands-on tutorial: pick up snow, toss it on the pile, sell it, buy a new
   tool. An arrow and a line on the ground show where to go. **Help, Replay tutorial** runs it again.
+- **Snowball fights:** with Bare Hands equipped, press **Q** (or **THROW** on mobile) to throw a
+  snowball. A hit stuns the other player for half a second with a stumble.
+- **Falling presents:** every minute or so, presents float down from the sky somewhere in town.
+  Walk into one for bonus coins.
 
 ## Features
 
@@ -104,6 +110,8 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 | `src/server/Main.server.luau` | ServerScriptService.Server | Remotes, scooping, held tools, pile, selling, shop, daily, spin, tutorial steps |
 | `src/server/World.luau` | ServerScriptService.Server | Town, roads, houses, lighting, market hub and display |
 | `src/server/SnowService.luau` | ServerScriptService.Server | Regrowing snow tiles |
+| `src/server/SnowballService.luau` | ServerScriptService.Server | Snowball throws, server-checked hits, stun |
+| `src/server/PresentService.luau` | ServerScriptService.Server | Presents dropping from the sky, pickups |
 | `src/server/DataService.luau` | ServerScriptService.Server | DataStore saving |
 | `src/client/Client.client.luau` | StarterPlayerScripts.Client | Starts the UI, input, server messages |
 | `src/client/UI/Theme.luau` | ...Client.UI | Colours, fonts, drawn coin and arrow icons |
@@ -114,6 +122,7 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 | `src/client/UI/SpinPanel.luau` | ...Client.UI | Lucky Spin wheel |
 | `src/client/UI/HelpPanel.luau` | ...Client.UI | How to play, replay tutorial |
 | `src/client/Tutorial.luau` | ...Client | Step card, world arrow, ground line, screen-edge arrow |
+| `src/client/Snowballs.luau` | ...Client | Throw input, snowball visuals, stumble |
 | `src/client/WorldEffects.luau` | ...Client | Pile mound, snowfall, display labels and turntables |
 
 The UI uses no emoji or special characters, because Roblox fonts show those as empty boxes.

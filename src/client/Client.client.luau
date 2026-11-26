@@ -10,6 +10,7 @@
 --   UI/SpinPanel.luau   lucky spin wheel
 --   UI/HelpPanel.luau   how to play
 --   Tutorial.luau       step-by-step tutorial with arrows
+--   Snowballs.luau      snowball throwing (Bare Hands), flight visuals, stumble
 --   WorldEffects.luau   pile mound, snowfall, display labels and turntables
 
 local Players = game:GetService("Players")
@@ -28,6 +29,7 @@ local Daily = require(UI.DailyPanel)
 local Spin = require(UI.SpinPanel)
 local Help = require(UI.HelpPanel)
 require(script.Parent:WaitForChild("Tutorial"))
+require(script.Parent:WaitForChild("Snowballs"))
 local WorldEffects = require(script.Parent:WaitForChild("WorldEffects"))
 
 local player = Players.LocalPlayer
@@ -121,6 +123,9 @@ Remotes.Notify.OnClientEvent:Connect(function(kind, a, b)
 		end
 	elseif kind == "dumped" then
 		Hud.floater("+" .. fmt(a) .. " snow on the pile", Color3.new(1, 1, 1))
+	elseif kind == "present" then
+		Hud.floater("Present! +" .. fmt(a) .. " coins", Color3.fromHex("#ffd54f"))
+		Hud.toast("You opened a present: +" .. fmt(a) .. " coins!", 2.5)
 	elseif kind == "sold" then
 		Hud.floater("+" .. fmt(a) .. " coins")
 	elseif kind == "full" then

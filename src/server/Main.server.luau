@@ -14,6 +14,8 @@ local Models = require(Shared.Models)
 local World = require(script.Parent.World)
 local SnowService = require(script.Parent.SnowService)
 local DataService = require(script.Parent.DataService)
+local SnowballService = require(script.Parent.SnowballService)
+local PresentService = require(script.Parent.PresentService)
 
 local H = Config.Hub
 
@@ -41,7 +43,6 @@ local ClaimDaily = remoteFunction("ClaimDaily")
 local Spin = remoteFunction("Spin")
 local SellPile = remoteFunction("SellPile")
 local TutorialAction = remoteEvent("TutorialAction")
-remotes.Parent = ReplicatedStorage
 
 -- ------------------------------------------------------------------ world
 local blocks, hub = World.Build()
@@ -158,6 +159,37 @@ type Runtime = {
 	busy: boolean,
 }
 local runtime: { [Player]: Runtime } = {}
+
+-- ------------------------------------------------------------------ snowballs and presents
+SnowballService.Init(remotes, {
+	-- only with Bare Hands equipped
+	canThrow = function(player)
+		local d = DataService.Get(player)
+		return d ~= nil and d.equipped == "hands"
+	end,
+	onStun = function(player)
+		local r = runtime[player]
+		if r then
+			r.scooping = false
+		end
+	end,
+	walkSpeed = function(player)
+		local d = DataService.Get(player)
+		return Config.GetTool(if d then d.equipped else "hands").speed
+	end,
+})
+PresentService.Init(Notify, function(player)
+	-- coins for picking up a present: scales with your next upgrade
+	local d = DataService.Get(player)
+	if not d then
+		return 0
+	end
+	local coins = math.max(Config.Presents.MinCoins, math.floor(progressCoins(d) * Config.Presents.ProgressShare + 0.5))
+	d.coins += coins
+	publish(player)
+	return coins
+end)
+remotes.Parent = ReplicatedStorage
 
 function publish(player: Player)
 	local d = DataService.Get(player)
