@@ -61,15 +61,18 @@ new("ParticleEmitter", {
 })
 
 -- display labels: price, OWNED or EQUIPPED
+local function labelOf(holder: Instance)
+	local hit = holder:FindFirstChild("Hit")
+	return hit and hit:FindFirstChild("Label")
+end
+
 function WorldEffects.refreshDisplays()
 	local owned = Shop.ownedSet()
 	local equipped = player:GetAttribute("Equipped")
 	for _, holder in CollectionService:GetTagged("ToolDisplay") do
 		local id = holder:GetAttribute("ToolId")
-		local hit = holder:FindFirstChild("Hit")
-		local bb = hit and hit:FindFirstChildOfClass("BillboardGui")
-		local frame = bb and bb:FindFirstChildOfClass("Frame")
-		local sub = frame and frame:FindFirstChild("Subtitle")
+		local bb = labelOf(holder)
+		local sub = bb and bb:FindFirstChild("Subtitle")
 		if sub then
 			local tool = Config.GetTool(id)
 			sub.Text = if equipped == id then "EQUIPPED" elseif owned[id] then "OWNED" else fmt(tool.price) .. " coins"
@@ -77,6 +80,82 @@ function WorldEffects.refreshDisplays()
 		end
 	end
 end
+
+-- The tool you point at (or stand closest to) on the display is "selected": its label grows,
+-- turns gold and shows on top, and the tool gets a glowing outline.
+local highlight = new("Highlight", {
+	Name = "DisplayHighlight",
+	FillColor = Color3.fromHex("#ffd54f"),
+	FillTransparency = 0.75,
+	OutlineColor = Color3.fromHex("#ffd54f"),
+	OutlineTransparency = 0,
+	DepthMode = Enum.HighlightDepthMode.Occluded,
+	Enabled = false,
+	Parent = Workspace,
+})
+local mouse = player:GetMouse()
+local selected: Instance? = nil
+local function setSelected(holder: Instance?)
+	if holder == selected then
+		return
+	end
+	if selected then
+		local bb = labelOf(selected)
+		if bb then
+			bb.Size = UDim2.fromScale(3.8, 1.1)
+			bb.AlwaysOnTop = false
+			bb.Title.TextColor3 = Color3.new(1, 1, 1)
+		end
+	end
+	selected = holder
+	if holder then
+		local bb = labelOf(holder)
+		if bb then
+			bb.Size = UDim2.fromScale(6.5, 1.9)
+			bb.AlwaysOnTop = true
+			bb.Title.TextColor3 = C.accent
+		end
+		highlight.Adornee = holder:FindFirstChild("Item")
+		highlight.Enabled = true
+	else
+		highlight.Enabled = false
+		highlight.Adornee = nil
+	end
+end
+
+local function findSelected(): Instance?
+	-- pointing at a tool (or its invisible click box)
+	local target = mouse.Target
+	while target and target ~= Workspace do
+		if target:GetAttribute("ToolId") then
+			return target
+		end
+		target = target.Parent
+	end
+	-- otherwise the closest one within a few steps
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return nil
+	end
+	local best, bestD = nil, 9
+	for _, holder in CollectionService:GetTagged("ToolDisplay") do
+		local hit = holder:FindFirstChild("Hit")
+		if hit then
+			local d = (Vector3.new(hit.Position.X, hrp.Position.Y, hit.Position.Z) - hrp.Position).Magnitude
+			if d < bestD then
+				best, bestD = holder, d
+			end
+		end
+	end
+	return best
+end
+task.spawn(function()
+	while true do
+		task.wait(0.1)
+		setSelected(findSelected())
+	end
+end)
 player:GetAttributeChangedSignal("Owned"):Connect(WorldEffects.refreshDisplays)
 player:GetAttributeChangedSignal("Equipped"):Connect(WorldEffects.refreshDisplays)
 task.delay(2, WorldEffects.refreshDisplays)
