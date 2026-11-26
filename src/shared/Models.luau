@@ -389,13 +389,15 @@ function Models.BuildHandTool(id: string): Model
 	if id == "hands" then
 		load(g, 0.26, 0.13, 0.26, 0, -0.05, 0.06)
 	elseif id == "trowel" then
-		cylY(g, 0.03, 0.14, st("#2e7d32"), 0, 0, 0)
-		cylY(g, 0.01, 0.1, M.steel, 0, -0.12, 0)
+		-- drawn a bit larger than life so it reads clearly in the player's hand
+		local k = 1.7
+		cylY(g, 0.03 * k, 0.14 * k, st("#2e7d32"), 0, 0, 0)
+		cylY(g, 0.01 * k, 0.1 * k, M.steel, 0, -0.12 * k, 0)
 		local blade = st("#b9bec6", Enum.Material.Metal)
-		tri(g, v(-0.06, -0.17, 0.02), v(0.06, -0.17, 0.02), v(0, -0.38, 0.06), 0.015, blade)
-		box(g, 0.02, 0.18, 0.04, blade, -0.055, -0.25, 0.04, 0, 0, -0.28)
-		box(g, 0.02, 0.18, 0.04, blade, 0.055, -0.25, 0.04, 0, 0, 0.28)
-		load(g, 0.1, 0.05, 0.1, 0, -0.24, 0.07)
+		tri(g, v(-0.06 * k, -0.17 * k, 0.02 * k), v(0.06 * k, -0.17 * k, 0.02 * k), v(0, -0.38 * k, 0.06 * k), 0.015 * k, blade)
+		box(g, 0.02 * k, 0.18 * k, 0.04 * k, blade, -0.055 * k, -0.25 * k, 0.04 * k, 0, 0, -0.28)
+		box(g, 0.02 * k, 0.18 * k, 0.04 * k, blade, 0.055 * k, -0.25 * k, 0.04 * k, 0, 0, 0.28)
+		load(g, 0.1 * k, 0.05 * k, 0.1 * k, 0, -0.24 * k, 0.07 * k)
 	else
 		local P = SHOVELS[id] or SHOVELS.shovel
 		local shaftSt = st(P.shaft, Enum.Material.Wood)
@@ -1102,6 +1104,152 @@ function Models.BuildGift(): Model
 		box(g, 0.06, 0.35, 0.35, gold, s * 0.18, 1.32, 0, 0.785, 0, s * 0.5)
 	end
 	return model
+end
+
+-- ------------------------------------------------------------------ event models
+local function reindeer(g: Frame, x: number, z: number, lead: boolean)
+	local fur = st("#7b5236", Enum.Material.Fabric)
+	local belly = st("#c9a27e", Enum.Material.Fabric)
+	local hoof = st("#2b211b")
+	local r = sub(g, x, 0, z)
+	blob(r, 0.36, 0.38, 0.85, fur, 0, 0.95, 0)
+	blob(r, 0.28, 0.2, 0.6, belly, 0, 0.85, 0)
+	blob(r, 0.14, 0.14, 0.12, st("#f3eee6", Enum.Material.Fabric), 0, 1.02, -0.43) -- tail
+	for _, lx in { -0.11, 0.11 } do
+		for _, lz in { -0.28, 0.28 } do
+			box(r, 0.07, 0.62, 0.08, fur, lx, 0.45, lz)
+			box(r, 0.09, 0.08, 0.1, hoof, lx, 0.12, lz + 0.01)
+		end
+	end
+	rod(r, v(0, 1.05, 0.33), v(0, 1.38, 0.52), 0.07, fur) -- neck
+	blob(r, 0.2, 0.2, 0.34, fur, 0, 1.45, 0.62) -- head
+	blob(r, 0.13, 0.12, 0.14, belly, 0, 1.41, 0.78) -- muzzle
+	ball(r, 0.045, if lead then st("#ff2d2d", Enum.Material.Neon) else M.black, 0, 1.43, 0.86)
+	ball(r, 0.025, M.black, -0.08, 1.5, 0.7)
+	ball(r, 0.025, M.black, 0.08, 1.5, 0.7)
+	box(r, 0.05, 0.1, 0.04, fur, -0.12, 1.55, 0.56, 0, 0, 0.7) -- ears
+	box(r, 0.05, 0.1, 0.04, fur, 0.12, 1.55, 0.56, 0, 0, -0.7)
+	local antler = st("#e2d2b0")
+	for _, sx in { -1, 1 } do
+		rod(r, v(sx * 0.06, 1.55, 0.6), v(sx * 0.2, 1.85, 0.55), 0.02, antler)
+		rod(r, v(sx * 0.2, 1.85, 0.55), v(sx * 0.3, 2.0, 0.45), 0.018, antler)
+		rod(r, v(sx * 0.15, 1.75, 0.57), v(sx * 0.12, 1.92, 0.68), 0.016, antler)
+		rod(r, v(sx * 0.24, 1.92, 0.52), v(sx * 0.2, 2.06, 0.6), 0.015, antler)
+	end
+	-- harness collar with a gold bell
+	cylZ(r, 0.11, 0.05, st("#b71c1c", Enum.Material.Fabric), 0, 1.15, 0.36)
+	ball(r, 0.04, st("#ffd54f", Enum.Material.Metal), 0, 1.03, 0.4)
+end
+
+-- Santa's sleigh with Santa, his sack and three reindeer (two side by side, Rudolph in
+-- front). Origin = ground under the sleigh; faces -Z in Roblox after finishing.
+function Models.BuildSleigh(): Model
+	local model, g = newModel("SantaSleigh")
+	local red = st("#c62828")
+	local gold = st("#ffcc33", Enum.Material.Metal)
+	-- runners with curled fronts
+	for _, x in { -0.42, 0.42 } do
+		box(g, 0.05, 0.05, 1.7, gold, x, 0.08, 0)
+		arc(g, 0.25, 0.85, 0.17, math.pi, -0.3, 7, 0.05, 0.05, gold, x)
+		for _, z in { -0.5, 0.4 } do
+			box(g, 0.04, 0.28, 0.04, gold, x, 0.24, z)
+		end
+	end
+	-- body
+	box(g, 0.95, 0.42, 1.4, red, 0, 0.6, -0.05)
+	box(g, 0.95, 0.5, 0.12, red, 0, 1.0, -0.72) -- tall back
+	box(g, 0.99, 0.06, 1.44, gold, 0, 0.83, -0.05)
+	box(g, 0.95, 0.35, 0.1, red, 0, 0.9, 0.62, -0.5, 0, 0) -- front curl
+	ball(g, 0.08, gold, -0.48, 1.25, -0.72)
+	ball(g, 0.08, gold, 0.48, 1.25, -0.72)
+	box(g, 0.85, 0.08, 0.5, st("#1b5e20", Enum.Material.Fabric), 0, 0.86, -0.4) -- seat
+	-- the sack of presents
+	blob(g, 0.6, 0.7, 0.5, st("#8d6e63", Enum.Material.Fabric), 0.15, 1.15, -0.55)
+	box(g, 0.22, 0.22, 0.22, st("#2e7d32"), 0.05, 1.5, -0.55, 0.3, 0.4, 0)
+	box(g, 0.2, 0.2, 0.2, st("#1565c0"), 0.28, 1.47, -0.5, 0.2, -0.5, 0.2)
+	-- Santa
+	local sx = -0.18
+	box(g, 0.42, 0.5, 0.36, st("#d32f2f", Enum.Material.Fabric), sx, 1.15, -0.32)
+	box(g, 0.44, 0.08, 0.38, M.black, sx, 1.02, -0.32)
+	box(g, 0.1, 0.06, 0.02, gold, sx, 1.02, -0.12)
+	box(g, 0.44, 0.1, 0.38, st("#ffffff", Enum.Material.Fabric), sx, 0.92, -0.32)
+	for _, ax in { -0.26, 0.26 } do
+		rod(g, v(sx + ax, 1.33, -0.32), v(sx + ax * 0.9, 1.12, 0.0), 0.075, st("#d32f2f", Enum.Material.Fabric))
+		ball(g, 0.065, M.black, sx + ax * 0.85, 1.1, 0.04)
+	end
+	ball(g, 0.17, st("#f1c6a0"), sx, 1.55, -0.3)
+	blob(g, 0.3, 0.28, 0.16, st("#ffffff", Enum.Material.Fabric), sx, 1.45, -0.18) -- beard
+	ball(g, 0.035, st("#e57373"), sx, 1.56, -0.13) -- nose
+	ball(g, 0.022, M.black, sx - 0.06, 1.6, -0.15)
+	ball(g, 0.022, M.black, sx + 0.06, 1.6, -0.15)
+	cylY(g, 0.18, 0.08, st("#ffffff", Enum.Material.Fabric), sx, 1.68, -0.3)
+	rod(g, v(sx, 1.7, -0.3), v(sx + 0.08, 1.95, -0.42), 0.12, st("#d32f2f", Enum.Material.Fabric))
+	ball(g, 0.06, st("#ffffff", Enum.Material.Fabric), sx + 0.1, 1.98, -0.46)
+	-- reindeer and harness
+	reindeer(g, -0.32, 1.6, false)
+	reindeer(g, 0.32, 1.6, false)
+	reindeer(g, 0, 2.75, true)
+	local strap = st("#6d1b1b", Enum.Material.Fabric)
+	rod(g, v(-0.3, 0.85, 0.6), v(-0.32, 1.12, 1.95), 0.02, strap)
+	rod(g, v(0.3, 0.85, 0.6), v(0.32, 1.12, 1.95), 0.02, strap)
+	rod(g, v(0, 1.12, 1.95), v(0, 1.12, 3.1), 0.02, strap)
+	rod(g, v(-0.32, 1.12, 1.95), v(0.32, 1.12, 1.95), 0.02, strap)
+	rod(g, v(sx - 0.22, 1.1, 0.04), v(-0.32, 1.12, 1.95), 0.01, M.black) -- reins
+	rod(g, v(sx + 0.22, 1.1, 0.04), v(0.32, 1.12, 1.95), 0.01, M.black)
+	return finish(model)
+end
+
+-- The Yeti: a big shaggy snow beast, about 4.6 m tall. Origin at its feet, faces -Z.
+function Models.BuildYeti(): Model
+	local model, g = newModel("Yeti")
+	local fur = st("#eef3fa", Enum.Material.Snow)
+	local shade = st("#d3dfee", Enum.Material.Snow)
+	local skin = st("#6f8fb3")
+	local dark = st("#22324a")
+	-- legs and feet
+	for _, x in { -0.45, 0.45 } do
+		blob(g, 0.7, 1.4, 0.75, fur, x, 0.9, 0)
+		blob(g, 0.6, 0.3, 0.9, skin, x, 0.15, 0.15)
+		for _, t in { -0.18, 0, 0.18 } do
+			ball(g, 0.07, st("#e9e2cf"), x + t, 0.1, 0.6)
+		end
+	end
+	-- body
+	blob(g, 2.0, 2.2, 1.5, fur, 0, 2.6, 0)
+	blob(g, 1.2, 1.3, 0.4, shade, 0, 2.5, 0.6) -- chest
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		blob(g, 0.5, 0.6, 0.5, fur, math.cos(a) * 0.9, 1.65, math.sin(a) * 0.65) -- shaggy fringe
+	end
+	-- arms
+	for _, sx in { -1, 1 } do
+		local arm = sub(g, sx * 1.05, 3.2, 0, 0, 0, sx * 0.25)
+		blob(arm, 0.7, 1.9, 0.7, fur, sx * 0.1, -0.9, 0)
+		blob(arm, 0.55, 0.45, 0.6, skin, sx * 0.2, -1.9, 0.05)
+		for _, t in { -0.15, 0, 0.15 } do
+			box(arm, 0.06, 0.18, 0.06, st("#e9e2cf"), sx * 0.2 + t, -2.15, 0.2, 0.4, 0, 0)
+		end
+	end
+	-- head
+	blob(g, 1.3, 1.15, 1.2, fur, 0, 4.05, 0.05)
+	blob(g, 0.9, 0.75, 0.3, skin, 0, 3.95, 0.55) -- face
+	blob(g, 0.24, 0.16, 0.08, st("#ffffff"), -0.2, 4.12, 0.7)
+	blob(g, 0.24, 0.16, 0.08, st("#ffffff"), 0.2, 4.12, 0.7)
+	ball(g, 0.06, st("#d50000", Enum.Material.Neon), -0.2, 4.12, 0.74)
+	ball(g, 0.06, st("#d50000", Enum.Material.Neon), 0.2, 4.12, 0.74)
+	box(g, 0.3, 0.06, 0.06, dark, -0.2, 4.25, 0.7, 0, 0, -0.35) -- angry brows
+	box(g, 0.3, 0.06, 0.06, dark, 0.2, 4.25, 0.7, 0, 0, 0.35)
+	blob(g, 0.5, 0.25, 0.1, dark, 0, 3.75, 0.68) -- mouth
+	for _, x in { -0.16, 0.16 } do
+		box(g, 0.07, 0.14, 0.04, st("#ffffff"), x, 3.82, 0.72) -- fangs
+	end
+	-- horns
+	local horn = st("#d9c9a3")
+	for _, sx in { -1, 1 } do
+		rod(g, v(sx * 0.45, 4.4, 0), v(sx * 0.8, 4.75, -0.1), 0.1, horn)
+		rod(g, v(sx * 0.8, 4.75, -0.1), v(sx * 0.85, 5.05, 0.15), 0.07, horn)
+	end
+	return finish(model)
 end
 
 -- Decorated plaza tree.

@@ -1,4 +1,4 @@
-# Clear the Snow ❄ (Roblox)
+# Clear the Snow (Roblox)
 
 A snow-clearing harvest game for Roblox. The neighbourhood is buried in snow that slowly
 grows back. Scoop it up, toss it on the **Snow Pile**, sell the pile to the **Snow Buyer**,
@@ -10,17 +10,56 @@ assets to upload.
 
 ## Open it in Roblox Studio
 
-**Quickest:** open `ClearTheSnow.rbxlx` (built with `rojo build`) in Roblox Studio and press Play.
+**Quickest:** open `ClearTheSnow.rbxlx` in Roblox Studio and press Play.
 
-**With Rojo (for editing the code):**
+## Editing the game with Rojo
 
-1. Install [Rojo](https://rojo.space) 7.x and the Rojo Studio plugin.
-2. In this folder run `rojo serve`.
-3. In Studio, open a new Baseplate, click **Rojo → Connect**, then press Play.
+All the game's code lives in `src/` as plain `.luau` files. [Rojo](https://rojo.space) syncs
+them into Studio live, so you edit in VS Code, hit save, and Studio updates.
 
-To rebuild the place file: `rojo build -o ClearTheSnow.rbxlx`.
+**One-time setup**
 
-**Saving progress:** publish the place, then turn on *Game Settings → Security → Enable Studio
+1. Install [VS Code](https://code.visualstudio.com/).
+2. Install Rojo. Either:
+   - install [Rokit](https://github.com/rojo-rbx/rokit) and run `rokit install` in this folder
+     (it reads `rokit.toml` and gets the right Rojo version), or
+   - install the **Rojo** VS Code extension, which can install Rojo for you.
+3. Install the Rojo plugin in Studio: run `rojo plugin install`, or get "Rojo" from the
+   Creator Store plugins.
+4. Open this folder in VS Code and accept the recommended extensions (Rojo and Luau LSP).
+   Luau LSP gives you autocomplete for the Roblox API.
+
+**Every time you work on it**
+
+1. In this folder run `rojo serve` (or in VS Code: Rojo, then *Start server*).
+2. In Studio open `ClearTheSnow.rbxlx` (or a new Baseplate), then click **Rojo, Connect**.
+3. Edit any file in `src/` and save. Studio updates right away. Press Play to test.
+
+To make a fresh place file: `rojo build -o ClearTheSnow.rbxlx`.
+
+Rojo only manages `ReplicatedStorage.Shared`, `ServerScriptService.Server` and
+`StarterPlayerScripts.Client`. Anything you build by hand in Studio's Workspace (extra
+buildings, decorations, terrain) is left alone, so you can mix code and hand-built parts.
+Save the place in Studio to keep those.
+
+**Where to change things**
+
+| I want to change... | Edit |
+| --- | --- |
+| Tool prices, capacity, speed, names | `src/shared/Config.luau` (`Config.Tools`) |
+| Snow regrowth speed, sell price | `src/shared/Config.luau` (top of file) |
+| Daily rewards, spin wheel prizes and odds | `src/shared/Config.luau` |
+| Tutorial steps and text | `src/shared/Config.luau` (`Config.Tutorial`) |
+| Snowball cooldown, speed, stun time | `src/shared/Config.luau` (`Config.Snowball`) |
+| How often presents drop and what they pay | `src/shared/Config.luau` (`Config.Presents`) |
+| Event timer, rewards, Santa's runway, Yeti HP | `src/shared/Config.luau` (`Config.Events`) |
+| Add a new timed event | add a module to `src/server/Events/` (see the notes at the top of `EventService.luau`) |
+| Where the market, pile, shop and wheel stand | `src/shared/Config.luau` (`Config.Hub`) |
+| UI colours and fonts | `src/client/UI/Theme.luau` |
+| A tool's or machine's 3D model | `src/shared/Models.luau` |
+| The town layout | `src/server/World.luau` |
+
+**Saving progress:** publish the place, then turn on *Game Settings, Security, Enable Studio
 Access to API Services* to test DataStores in Studio. Without it the game runs but doesn't save.
 
 ## How to play
@@ -29,6 +68,18 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 - **R** or the side button toggles auto-scoop. Machines scoop automatically while driving.
 - Walk up to the Snow Pile to toss your load in, then use the Snow Buyer's prompt (**E**) to sell.
 - Walk up to the tool display and press **E**, or click a tool, to open it in the shopping list.
+- New players get a hands-on tutorial: pick up snow, toss it on the pile, sell it, buy a new
+  tool. An arrow and a line on the ground show where to go. **Help, Replay tutorial** runs it again.
+- **Snowball fights:** with Bare Hands equipped, press **Q** (or **THROW** on mobile) to throw a
+  snowball. A hit stuns the other player for half a second with a stumble.
+- **Timed events:** every 10 minutes (1 minute when testing in Studio) a random event starts,
+  with a countdown, timer and progress bar at the top of the screen. Everyone who helps gets coins.
+  - **Santa Sled Party:** deep snow piles onto the main road and stops growing back. Clear it
+    (scooping there is faster and doesn't fill your load) so Santa and his 3 reindeer can take off.
+  - **Yeti Abomination:** a Yeti rises out of the snow. Everyone can throw snowballs (Q), whatever
+    tool they hold. Its HP is 15 snowballs per player in the server.
+- **Falling presents:** every minute or so, presents float down from the sky somewhere in town.
+  Walk into one for bonus coins.
 
 ## Features
 
@@ -62,14 +113,31 @@ Access to API Services* to test DataStores in Studio. Without it the game runs b
 
 | Path | Where it ends up | What it does |
 | --- | --- | --- |
-| `src/shared/Config.luau` | ReplicatedStorage.Shared | Tool stats and prices, daily rewards, wheel, market layout |
+| `src/shared/Config.luau` | ReplicatedStorage.Shared | All the numbers and text: tools, rewards, wheel, tutorial, layout |
 | `src/shared/Models.luau` | ReplicatedStorage.Shared | Part-built models: tools, machines, stalls, NPCs, houses, trees, wheel |
-| `src/server/Main.server.luau` | ServerScriptService.Server | Remotes, scooping loop, pile, selling, shop, daily, spin |
+| `src/server/Main.server.luau` | ServerScriptService.Server | Remotes, scooping, held tools, pile, selling, shop, daily, spin, tutorial steps |
 | `src/server/World.luau` | ServerScriptService.Server | Town, roads, houses, lighting, market hub and display |
 | `src/server/SnowService.luau` | ServerScriptService.Server | Regrowing snow tiles |
+| `src/server/SnowballService.luau` | ServerScriptService.Server | Snowball throws, server-checked hits, stun |
+| `src/server/PresentService.luau` | ServerScriptService.Server | Presents dropping from the sky, pickups |
+| `src/server/EventService.luau` | ServerScriptService.Server | Event timer: picks and runs a random event |
+| `src/server/Events/SantaSled.luau` | ...Server.Events | Santa Sled Party |
+| `src/server/Events/Yeti.luau` | ...Server.Events | Yeti Abomination |
 | `src/server/DataService.luau` | ServerScriptService.Server | DataStore saving |
-| `src/client/Client.client.luau` | StarterPlayerScripts.Client | HUD, shopping list, daily rewards, spin wheel, input, effects |
+| `src/client/Client.client.luau` | StarterPlayerScripts.Client | Starts the UI, input, server messages |
+| `src/client/UI/Theme.luau` | ...Client.UI | Colours, fonts, drawn coin and arrow icons |
+| `src/client/UI/Panels.luau` | ...Client.UI | The ScreenGui and pop-up window frame |
+| `src/client/UI/Hud.luau` | ...Client.UI | Coins, pile, load bar, side buttons, toasts |
+| `src/client/UI/ShopPanel.luau` | ...Client.UI | Shopping list |
+| `src/client/UI/DailyPanel.luau` | ...Client.UI | Daily rewards |
+| `src/client/UI/SpinPanel.luau` | ...Client.UI | Lucky Spin wheel |
+| `src/client/UI/EventBar.luau` | ...Client.UI | Event countdown and progress / HP bar |
+| `src/client/UI/HelpPanel.luau` | ...Client.UI | How to play, replay tutorial |
+| `src/client/Tutorial.luau` | ...Client | Step card, world arrow, ground line, screen-edge arrow |
+| `src/client/Snowballs.luau` | ...Client | Throw input, snowball visuals, stumble |
+| `src/client/WorldEffects.luau` | ...Client | Pile mound, snowfall, display labels and turntables |
 
-Balance numbers (prices, capacities, scoop rates, regrow time) are all in `Config.luau`.
+The UI uses no emoji or special characters, because Roblox fonts show those as empty boxes.
+Icons are drawn from frames in `Theme.luau`.
 
 `web-prototype/` holds the earlier browser version (Three.js) for reference.

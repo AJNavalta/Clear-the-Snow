@@ -386,7 +386,7 @@ function World.BuildHub(root: Instance)
 		click.Parent = hit
 		local pp = prompt(hit, "Inspect", tool.name, 7)
 		pp.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-		local title, sub = billboard(hit, tool.name, "🪙 " .. Config.FormatNumber(tool.price), bsize.Y / 2 + 1.4, 150)
+		local title, sub = billboard(hit, tool.name, Config.FormatNumber(tool.price) .. " coins", bsize.Y / 2 + 1.4, 150)
 		title.Name = "Title"
 		sub.Name = "Subtitle"
 		holder.Parent = displayFolder

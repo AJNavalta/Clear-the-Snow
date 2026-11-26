@@ -14,6 +14,9 @@ local Models = require(Shared.Models)
 local World = require(script.Parent.World)
 local SnowService = require(script.Parent.SnowService)
 local DataService = require(script.Parent.DataService)
+local SnowballService = require(script.Parent.SnowballService)
+local PresentService = require(script.Parent.PresentService)
+local EventService = require(script.Parent.EventService)
 
 local H = Config.Hub
 
@@ -40,7 +43,7 @@ local EquipTool = remoteFunction("EquipTool")
 local ClaimDaily = remoteFunction("ClaimDaily")
 local Spin = remoteFunction("Spin")
 local SellPile = remoteFunction("SellPile")
-remotes.Parent = ReplicatedStorage
+local TutorialAction = remoteEvent("TutorialAction")
 
 -- ------------------------------------------------------------------ world
 local blocks, hub = World.Build()
@@ -100,13 +103,52 @@ local function wheelCoins(d, seg): number
 	return math.max(10, math.floor(progressCoins(d) * 0.1 + 0.5)) * seg.mult
 end
 
+-- ------------------------------------------------------------------ tutorial
+-- Steps (see Config.Tutorial): 1 scoop until full, 2 toss on the pile, 3 sell,
+-- 4 buy the next tool, 5 "enjoy the game" card, 0 finished.
+local publish -- forward declaration
+
+local function setTutorial(player: Player, d, step: number)
+	if d.tutorial == step then
+		return
+	end
+	if step == 4 and not nextTool(d) then
+		step = 5 -- nothing left to buy
+	end
+	d.tutorial = step
+	if step == 5 then
+		task.delay(Config.Tutorial.EnjoySeconds, function()
+			local d2 = DataService.Get(player)
+			if d2 and d2.tutorial == 5 then
+				d2.tutorial = 0
+				publish(player)
+				task.spawn(DataService.Save, player)
+			end
+		end)
+	end
+end
+
+-- automatic steps, checked every frame
+local function tutorialTick(player: Player, d, cap: number)
+	local t = d.tutorial
+	if t == 1 and d.load >= math.max(1, cap) - 1e-6 then
+		setTutorial(player, d, 2)
+		t = 2
+	end
+	if (t == 1 or t == 2) and d.pile >= 1 then
+		setTutorial(player, d, 3)
+	end
+end
+
 -- ------------------------------------------------------------------ per-player runtime
 type Runtime = {
 	scooping: boolean,
-	visual: Model?,
-	weld: Weld?,
+	visual: Instance?, -- a Tool for hand tools, a welded Model for machines
+	tool: Tool?,
 	loadPart: BasePart?,
 	loadFull: number,
+	loadSize: Vector3?,
+	minFill: number,
 	front: number,
 	tilt: number,
 	dig: number,
@@ -119,7 +161,56 @@ type Runtime = {
 }
 local runtime: { [Player]: Runtime } = {}
 
-local function publish(player: Player)
+-- ------------------------------------------------------------------ snowballs and presents
+SnowballService.Init(remotes, {
+	-- only with Bare Hands equipped
+	canThrow = function(player)
+		local d = DataService.Get(player)
+		return d ~= nil and (d.equipped == "hands" or EventService.SnowballsForAll())
+	end,
+	onStun = function(player)
+		local r = runtime[player]
+		if r then
+			r.scooping = false
+		end
+	end,
+	onHit = function(inst, thrower)
+		return EventService.HandleSnowballHit(inst, thrower)
+	end,
+	walkSpeed = function(player)
+		local d = DataService.Get(player)
+		return Config.GetTool(if d then d.equipped else "hands").speed
+	end,
+})
+PresentService.Init(Notify, function(player)
+	-- coins for picking up a present: scales with your next upgrade
+	local d = DataService.Get(player)
+	if not d then
+		return 0
+	end
+	local coins = math.max(Config.Presents.MinCoins, math.floor(progressCoins(d) * Config.Presents.ProgressShare + 0.5))
+	d.coins += coins
+	publish(player)
+	return coins
+end)
+EventService.Init({
+	Notify = Notify,
+	SnowService = SnowService,
+	-- coins for helping with an event that succeeded
+	reward = function(player)
+		local d = DataService.Get(player)
+		if not d then
+			return 0
+		end
+		local coins = math.max(Config.Events.RewardMin, math.floor(progressCoins(d) * Config.Events.RewardShare + 0.5))
+		d.coins += coins
+		publish(player)
+		return coins
+	end,
+})
+remotes.Parent = ReplicatedStorage
+
+function publish(player: Player)
 	local d = DataService.Get(player)
 	if not d then
 		return
@@ -141,6 +232,7 @@ local function publish(player: Player)
 	player:SetAttribute("BoostSell", d.boosts.sell or 0)
 	player:SetAttribute("BoostCapacity", d.boosts.capacity or 0)
 	player:SetAttribute("Auto", d.auto)
+	player:SetAttribute("Tutorial", d.tutorial)
 	local ls = player:FindFirstChild("leaderstats")
 	if ls then
 		ls.Coins.Value = math.floor(d.coins)
@@ -161,7 +253,7 @@ local function clearVisual(player: Player, r: Runtime)
 		r.visual:Destroy()
 		r.visual = nil
 	end
-	r.weld = nil
+	r.tool = nil
 	r.loadPart = nil
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -204,22 +296,45 @@ local function attachVisual(player: Player)
 	Models.Weld(model)
 	model.Name = "EquippedTool"
 
-	local weld = Instance.new("Weld")
+	r.loadPart = loadPart
+	r.loadFull = if loadPart then (loadPart:GetAttribute("FullHeight") or loadPart.Size.Y) else 1
+	r.loadSize = if loadPart then loadPart.Size else nil
+	r.minFill = if tool.id == "hands" then 0.45 else 0
+
 	if tool.kind == "hand" then
-		local hand = (char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")) :: BasePart?
-		if not hand then
-			model:Destroy()
-			return
-		end
-		local grip = hand:FindFirstChild("RightGripAttachment") :: Attachment?
-		local gripPos = if grip then grip.Position else Vector3.new(0, -hand.Size.Y / 2, 0)
-		local len = -minY -- blade length below the grip, in studs
-		local gripHeight = 2.4
-		r.tilt = if len > gripHeight - 0.3 then math.acos(math.clamp((gripHeight - 0.35) / len, -1, 0.99)) else 0.3
+		-- Hand tools become a real Roblox Tool, so the character holds it out in the
+		-- right hand with the standard hold pose. The model's Root part is the Handle.
+		local len = -minY -- shaft + blade length below the grip, in studs
+		r.tilt = if len > 3.4 then math.acos(math.clamp(3.4 / len, -1, 0.99)) else 0.35
 		r.front = 1.5 + tool.radius * 0.6
-		weld.Part0 = hand
-		weld.C0 = CFrame.new(gripPos) * CFrame.Angles(r.tilt, 0, 0)
+		local t = Instance.new("Tool")
+		t.Name = tool.name
+		t.ToolTip = tool.name
+		t.CanBeDropped = false
+		t.RequiresHandle = true
+		t.ManualActivationOnly = true
+		local handle = model.PrimaryPart :: BasePart
+		handle.Name = "Handle"
+		for _, c in model:GetChildren() do
+			c.Parent = t
+		end
+		model:Destroy()
+		t.Grip = CFrame.Angles(-r.tilt, 0, 0)
+		t.Parent = char -- parenting a Tool to the character equips it
+		-- keep it in hand if anything tries to unequip it
+		t.AncestryChanged:Connect(function()
+			if r.visual == t and t.Parent and t.Parent ~= char and char.Parent then
+				task.defer(function()
+					if r.visual == t and char.Parent then
+						t.Parent = char
+					end
+				end)
+			end
+		end)
+		r.visual = t
+		r.tool = t
 	else
+		local weld = Instance.new("Weld")
 		local seat = model:GetAttribute("SeatOffset") :: Vector3
 		local standing = model:GetAttribute("Standing") == true
 		local hrpHeight = groundToHrp
@@ -242,14 +357,11 @@ local function attachVisual(player: Player)
 		weld.Part0 = hrp
 		weld.C0 = CFrame.new(-seat.X, -hrpHeight, -seat.Z)
 		r.front = math.max(2, seat.Z - minZ - tool.radius * 0.5)
+		weld.Part1 = model.PrimaryPart
+		weld.Parent = model.PrimaryPart
+		model.Parent = char
+		r.visual = model
 	end
-	weld.Part1 = model.PrimaryPart
-	weld.Parent = model.PrimaryPart
-	model.Parent = char
-	r.visual = model
-	r.weld = weld
-	r.loadPart = loadPart
-	r.loadFull = if loadPart then (loadPart:GetAttribute("FullHeight") or loadPart.Size.Y) else 1
 	r.dig = 0
 	r.swing = -1
 end
@@ -259,7 +371,15 @@ local function updateLoadVisual(r: Runtime, fill: number)
 	if not p or not p.Parent then
 		return
 	end
-	if fill < 0.02 then
+	if r.minFill > 0 and r.loadSize then
+		-- bare hands: always hold a little snowball that grows as you scoop
+		local k = r.minFill + (1 - r.minFill) * math.clamp(fill, 0, 1)
+		local want = r.loadSize * k
+		if (p.Size - want).Magnitude > 0.02 then
+			p.Size = want
+		end
+		p.Transparency = 0
+	elseif fill < 0.02 then
 		p.Transparency = 1
 	else
 		p.Transparency = 0
@@ -298,6 +418,15 @@ local function sell(player: Player)
 	d.coins += coins
 	d.totalSold += units
 	d.pile -= units
+	if d.tutorial >= 1 and d.tutorial <= 3 then
+		local n = nextTool(d)
+		if Config.Tutorial.StarterBonus and n and Config.ToolIndex[n.id] == 2 and d.coins < n.price then
+			local bonus = n.price - d.coins
+			d.coins += bonus
+			Notify:FireClient(player, "toast", "Starter bonus: +" .. bonus .. " coins. Go buy the " .. n.name .. "!", 4)
+		end
+		setTutorial(player, d, 4)
+	end
 	publish(player)
 	Notify:FireClient(player, "sold", coins)
 	return coins
@@ -349,6 +478,19 @@ SetScooping.OnServerEvent:Connect(function(player, on)
 	end
 end)
 
+TutorialAction.OnServerEvent:Connect(function(player, action)
+	local d = DataService.Get(player)
+	if not d then
+		return
+	end
+	if action == "skip" then
+		d.tutorial = 0
+	elseif action == "replay" then
+		d.tutorial = 1
+	end
+	publish(player)
+end)
+
 SetAuto.OnServerEvent:Connect(function(player, on)
 	local d = DataService.Get(player)
 	if d then
@@ -383,6 +525,10 @@ BuyTool.OnServerInvoke = function(player, id)
 	table.insert(d.owned, id)
 	equip(player, id)
 	r.busy = false
+	if d.tutorial >= 1 and d.tutorial <= 4 then
+		setTutorial(player, d, 5)
+		publish(player)
+	end
 	task.spawn(DataService.Save, player)
 	return true, "You got the " .. tool.name .. "!"
 end
@@ -478,6 +624,7 @@ local function onPlayer(player: Player)
 	runtime[player] = {
 		scooping = false,
 		loadFull = 1,
+		minFill = 0,
 		front = 2,
 		tilt = 0,
 		dig = 0,
@@ -540,18 +687,30 @@ RunService.Heartbeat:Connect(function(dt)
 		local moving = hum.MoveDirection.Magnitude > 0.1
 		local wants = r.scooping or d.auto or (tool.kind == "machine" and moving)
 		local working = false
-		if wants and d.load < cap - 1e-6 then
+		local inZone = false
+		if wants then
 			local look = hrp.CFrame.LookVector
 			local flat = Vector3.new(look.X, 0, look.Z)
 			flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
 			local pos = hrp.Position + flat * r.front
-			local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
-			if got > 0 then
-				d.load = math.min(cap, d.load + got)
-				working = true
+			local zone = EventService.ZoneAt(pos.X, pos.Z)
+			if zone then
+				-- event clear-zone (e.g. Santa's runway): snow is shoveled aside, not carried
+				inZone = true
+				local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, tool.rate * dt * zone.boost)
+				if got > 0 then
+					zone.onCleared(player, got)
+					working = true
+				end
+			elseif d.load < cap - 1e-6 then
+				local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
+				if got > 0 then
+					d.load = math.min(cap, d.load + got)
+					working = true
+				end
 			end
 		end
-		if d.load >= cap - 1e-6 then
+		if d.load >= cap - 1e-6 and not inZone then
 			if wants and not r.fullWarned then
 				r.fullWarned = true
 				Notify:FireClient(player, "full")
@@ -561,12 +720,12 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 
 		-- digging motion for hand tools
-		if tool.kind == "hand" and r.weld and r.weld.Part0 then
+		if tool.kind == "hand" and r.tool then
 			r.dig = if working then r.dig + dt * 9 else 0
 			local swing = if working then (math.sin(r.dig) * 0.5 + 0.5) * 0.5 else 0
-			if math.abs(swing - r.swing) > 0.02 then
+			if math.abs(swing - r.swing) > 0.04 then
 				r.swing = swing
-				r.weld.C0 = CFrame.new(r.weld.C0.Position) * CFrame.Angles(r.tilt + swing, 0, 0)
+				r.tool.Grip = CFrame.Angles(-(r.tilt + swing), 0, 0)
 			end
 		end
 
@@ -581,6 +740,9 @@ RunService.Heartbeat:Connect(function(dt)
 			publish(player)
 		end
 
+		if d.tutorial > 0 then
+			tutorialTick(player, d, cap)
+		end
 		updateLoadVisual(r, d.load / cap)
 		if now - r.lastPublish > 0.15 then
 			r.lastPublish = now

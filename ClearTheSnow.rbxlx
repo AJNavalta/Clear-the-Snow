@@ -11,9 +11,12 @@
         <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
--- Game balance: tools, machines, daily rewards and the spin wheel.
--- capacity = snow carried per trip, rate = snow scooped per second,
--- radius = clearing radius (studs), speed = WalkSpeed while using it.
+-- Everything you're likely to tweak lives here: tool stats and prices, snow regrowth,
+-- daily rewards, the spin wheel, the tutorial text and where the market stands.
+-- Edit, save, and Rojo syncs it into Studio straight away.
+--
+-- Tool columns: capacity = snow carried per trip, rate = snow scooped per second,
+-- radius = clearing radius (metres), speed = walking speed (metres/second).
 
 local Config = {}
 
@@ -111,6 +114,68 @@ Config.Wheel = {
 	{ label = "2x Capacity", kind = "boost", boost = "capacity", mins = 3, color = "#3cc48a", weight = 10 },
 	{ label = "Huge Coins", kind = "coins", mult = 8, color = "#1d5d96", weight = 6 },
 	{ label = "JACKPOT", kind = "coins", mult = 25, color = "#e0505a", weight = 2 },
+}
+
+-- Hands-on tutorial for new players. Each step points an arrow at where to go.
+-- Step 4's %s is replaced by the name of the next tool to buy.
+Config.Tutorial = {
+	Steps = {
+		{ title = "Pick up snow", text = "Walk into the snow and hold click (or F) to scoop until you're full.", touchText = "Walk into the snow and hold SCOOP until you're full." },
+		{ title = "Toss it on the pile", text = "Carry your snow to the Snow Pile. You toss it in when you get close." },
+		{ title = "Sell it", text = "Walk up to the Snow Buyer and press E to sell your pile.", touchText = "Walk up to the Snow Buyer and tap Sell to sell your pile." },
+		{ title = "Buy a new tool", text = "Go to the Tool Shop display and buy the %s." },
+		{ title = "Enjoy the game!", text = "Keep clearing snow, sell it and upgrade all the way to the big machines." },
+	},
+	EnjoySeconds = 7, -- how long the final "Enjoy the game!" card stays up
+	StarterBonus = true, -- first sale tops coins up so a new player can afford the trowel
+}
+
+-- Snowball fights: with Bare Hands equipped, press Q (or tap THROW) to throw a snowball.
+-- A hit stuns the other player briefly with a stumble.
+Config.Snowball = {
+	Cooldown = 0.8, -- seconds between throws
+	Speed = 90, -- studs per second
+	Gravity = 40, -- studs per second squared (lower than world gravity for a nice arc)
+	MaxFlightTime = 2.5, -- seconds before a snowball melts away
+	StunSeconds = 0.5, -- how long a hit player can't move
+	ImmuneSeconds = 1.0, -- after a stun ends, how long before you can be stunned again
+	Radius = 0.45, -- snowball size (studs)
+}
+
+-- Christmas presents that drop from the sky. Walk into one to open it for bonus coins.
+Config.Presents = {
+	Interval = { 40, 80 }, -- seconds between drops (random in this range)
+	PerDrop = { 2, 4 }, -- presents per drop
+	MaxOnMap = 8,
+	FallSpeed = 18, -- studs per second
+	Lifetime = 120, -- seconds a landed present waits before vanishing
+	MinCoins = 15,
+	ProgressShare = 0.15, -- coins = this share of your next upgrade's price (at least MinCoins)
+}
+
+-- Timed events. Every Interval seconds one event is picked at random from the files in
+-- src/server/Events (add a new file there to add an event). A timer and a progress / HP
+-- bar show at the top of the screen. Everyone who helps gets a reward when it succeeds.
+Config.Events = {
+	Interval = 600, -- 10 minutes between events
+	StudioInterval = 60, -- shorter wait when you press Play in Studio, for testing
+	OnlyEvent = nil, -- e.g. "Yeti" or "SantaSled" to always run that one (handy for testing)
+	RewardShare = 0.5, -- reward = this share of your next upgrade's price...
+	RewardMin = 50, -- ...but at least this many coins
+
+	SantaSled = {
+		Duration = 300, -- seconds to clear the road
+		Runway = { -48, 42, 48, 60 }, -- x0, z0, x1, z1 (studs): the stretch of main road to clear
+		SleighPosition = Vector3.new(-62, 0, 51), -- Santa waits here and takes off along +X
+		SnowPerPlayer = 6, -- snow per road tile for each player in the server (max 20)
+		ClearBoost = 2, -- scooping on the runway is this much faster, and needs no space in your load
+		DoneAt = 0.97, -- share of the snow that must be cleared
+	},
+	Yeti = {
+		Duration = 240,
+		HitsPerPlayer = 15, -- Yeti HP = this x players in the server
+		Position = Vector3.new(60, 0, 51), -- where the Yeti appears (on the main road)
+	},
 }
 
 -- Market layout (studs). The hub sits in the plaza at the centre of town.
@@ -539,13 +604,15 @@ function Models.BuildHandTool(id: string): Model
 	if id == "hands" then
 		load(g, 0.26, 0.13, 0.26, 0, -0.05, 0.06)
 	elseif id == "trowel" then
-		cylY(g, 0.03, 0.14, st("#2e7d32"), 0, 0, 0)
-		cylY(g, 0.01, 0.1, M.steel, 0, -0.12, 0)
+		-- drawn a bit larger than life so it reads clearly in the player's hand
+		local k = 1.7
+		cylY(g, 0.03 * k, 0.14 * k, st("#2e7d32"), 0, 0, 0)
+		cylY(g, 0.01 * k, 0.1 * k, M.steel, 0, -0.12 * k, 0)
 		local blade = st("#b9bec6", Enum.Material.Metal)
-		tri(g, v(-0.06, -0.17, 0.02), v(0.06, -0.17, 0.02), v(0, -0.38, 0.06), 0.015, blade)
-		box(g, 0.02, 0.18, 0.04, blade, -0.055, -0.25, 0.04, 0, 0, -0.28)
-		box(g, 0.02, 0.18, 0.04, blade, 0.055, -0.25, 0.04, 0, 0, 0.28)
-		load(g, 0.1, 0.05, 0.1, 0, -0.24, 0.07)
+		tri(g, v(-0.06 * k, -0.17 * k, 0.02 * k), v(0.06 * k, -0.17 * k, 0.02 * k), v(0, -0.38 * k, 0.06 * k), 0.015 * k, blade)
+		box(g, 0.02 * k, 0.18 * k, 0.04 * k, blade, -0.055 * k, -0.25 * k, 0.04 * k, 0, 0, -0.28)
+		box(g, 0.02 * k, 0.18 * k, 0.04 * k, blade, 0.055 * k, -0.25 * k, 0.04 * k, 0, 0, 0.28)
+		load(g, 0.1 * k, 0.05 * k, 0.1 * k, 0, -0.24 * k, 0.07 * k)
 	else
 		local P = SHOVELS[id] or SHOVELS.shovel
 		local shaftSt = st(P.shaft, Enum.Material.Wood)
@@ -1254,6 +1321,152 @@ function Models.BuildGift(): Model
 	return model
 end
 
+-- ------------------------------------------------------------------ event models
+local function reindeer(g: Frame, x: number, z: number, lead: boolean)
+	local fur = st("#7b5236", Enum.Material.Fabric)
+	local belly = st("#c9a27e", Enum.Material.Fabric)
+	local hoof = st("#2b211b")
+	local r = sub(g, x, 0, z)
+	blob(r, 0.36, 0.38, 0.85, fur, 0, 0.95, 0)
+	blob(r, 0.28, 0.2, 0.6, belly, 0, 0.85, 0)
+	blob(r, 0.14, 0.14, 0.12, st("#f3eee6", Enum.Material.Fabric), 0, 1.02, -0.43) -- tail
+	for _, lx in { -0.11, 0.11 } do
+		for _, lz in { -0.28, 0.28 } do
+			box(r, 0.07, 0.62, 0.08, fur, lx, 0.45, lz)
+			box(r, 0.09, 0.08, 0.1, hoof, lx, 0.12, lz + 0.01)
+		end
+	end
+	rod(r, v(0, 1.05, 0.33), v(0, 1.38, 0.52), 0.07, fur) -- neck
+	blob(r, 0.2, 0.2, 0.34, fur, 0, 1.45, 0.62) -- head
+	blob(r, 0.13, 0.12, 0.14, belly, 0, 1.41, 0.78) -- muzzle
+	ball(r, 0.045, if lead then st("#ff2d2d", Enum.Material.Neon) else M.black, 0, 1.43, 0.86)
+	ball(r, 0.025, M.black, -0.08, 1.5, 0.7)
+	ball(r, 0.025, M.black, 0.08, 1.5, 0.7)
+	box(r, 0.05, 0.1, 0.04, fur, -0.12, 1.55, 0.56, 0, 0, 0.7) -- ears
+	box(r, 0.05, 0.1, 0.04, fur, 0.12, 1.55, 0.56, 0, 0, -0.7)
+	local antler = st("#e2d2b0")
+	for _, sx in { -1, 1 } do
+		rod(r, v(sx * 0.06, 1.55, 0.6), v(sx * 0.2, 1.85, 0.55), 0.02, antler)
+		rod(r, v(sx * 0.2, 1.85, 0.55), v(sx * 0.3, 2.0, 0.45), 0.018, antler)
+		rod(r, v(sx * 0.15, 1.75, 0.57), v(sx * 0.12, 1.92, 0.68), 0.016, antler)
+		rod(r, v(sx * 0.24, 1.92, 0.52), v(sx * 0.2, 2.06, 0.6), 0.015, antler)
+	end
+	-- harness collar with a gold bell
+	cylZ(r, 0.11, 0.05, st("#b71c1c", Enum.Material.Fabric), 0, 1.15, 0.36)
+	ball(r, 0.04, st("#ffd54f", Enum.Material.Metal), 0, 1.03, 0.4)
+end
+
+-- Santa's sleigh with Santa, his sack and three reindeer (two side by side, Rudolph in
+-- front). Origin = ground under the sleigh; faces -Z in Roblox after finishing.
+function Models.BuildSleigh(): Model
+	local model, g = newModel("SantaSleigh")
+	local red = st("#c62828")
+	local gold = st("#ffcc33", Enum.Material.Metal)
+	-- runners with curled fronts
+	for _, x in { -0.42, 0.42 } do
+		box(g, 0.05, 0.05, 1.7, gold, x, 0.08, 0)
+		arc(g, 0.25, 0.85, 0.17, math.pi, -0.3, 7, 0.05, 0.05, gold, x)
+		for _, z in { -0.5, 0.4 } do
+			box(g, 0.04, 0.28, 0.04, gold, x, 0.24, z)
+		end
+	end
+	-- body
+	box(g, 0.95, 0.42, 1.4, red, 0, 0.6, -0.05)
+	box(g, 0.95, 0.5, 0.12, red, 0, 1.0, -0.72) -- tall back
+	box(g, 0.99, 0.06, 1.44, gold, 0, 0.83, -0.05)
+	box(g, 0.95, 0.35, 0.1, red, 0, 0.9, 0.62, -0.5, 0, 0) -- front curl
+	ball(g, 0.08, gold, -0.48, 1.25, -0.72)
+	ball(g, 0.08, gold, 0.48, 1.25, -0.72)
+	box(g, 0.85, 0.08, 0.5, st("#1b5e20", Enum.Material.Fabric), 0, 0.86, -0.4) -- seat
+	-- the sack of presents
+	blob(g, 0.6, 0.7, 0.5, st("#8d6e63", Enum.Material.Fabric), 0.15, 1.15, -0.55)
+	box(g, 0.22, 0.22, 0.22, st("#2e7d32"), 0.05, 1.5, -0.55, 0.3, 0.4, 0)
+	box(g, 0.2, 0.2, 0.2, st("#1565c0"), 0.28, 1.47, -0.5, 0.2, -0.5, 0.2)
+	-- Santa
+	local sx = -0.18
+	box(g, 0.42, 0.5, 0.36, st("#d32f2f", Enum.Material.Fabric), sx, 1.15, -0.32)
+	box(g, 0.44, 0.08, 0.38, M.black, sx, 1.02, -0.32)
+	box(g, 0.1, 0.06, 0.02, gold, sx, 1.02, -0.12)
+	box(g, 0.44, 0.1, 0.38, st("#ffffff", Enum.Material.Fabric), sx, 0.92, -0.32)
+	for _, ax in { -0.26, 0.26 } do
+		rod(g, v(sx + ax, 1.33, -0.32), v(sx + ax * 0.9, 1.12, 0.0), 0.075, st("#d32f2f", Enum.Material.Fabric))
+		ball(g, 0.065, M.black, sx + ax * 0.85, 1.1, 0.04)
+	end
+	ball(g, 0.17, st("#f1c6a0"), sx, 1.55, -0.3)
+	blob(g, 0.3, 0.28, 0.16, st("#ffffff", Enum.Material.Fabric), sx, 1.45, -0.18) -- beard
+	ball(g, 0.035, st("#e57373"), sx, 1.56, -0.13) -- nose
+	ball(g, 0.022, M.black, sx - 0.06, 1.6, -0.15)
+	ball(g, 0.022, M.black, sx + 0.06, 1.6, -0.15)
+	cylY(g, 0.18, 0.08, st("#ffffff", Enum.Material.Fabric), sx, 1.68, -0.3)
+	rod(g, v(sx, 1.7, -0.3), v(sx + 0.08, 1.95, -0.42), 0.12, st("#d32f2f", Enum.Material.Fabric))
+	ball(g, 0.06, st("#ffffff", Enum.Material.Fabric), sx + 0.1, 1.98, -0.46)
+	-- reindeer and harness
+	reindeer(g, -0.32, 1.6, false)
+	reindeer(g, 0.32, 1.6, false)
+	reindeer(g, 0, 2.75, true)
+	local strap = st("#6d1b1b", Enum.Material.Fabric)
+	rod(g, v(-0.3, 0.85, 0.6), v(-0.32, 1.12, 1.95), 0.02, strap)
+	rod(g, v(0.3, 0.85, 0.6), v(0.32, 1.12, 1.95), 0.02, strap)
+	rod(g, v(0, 1.12, 1.95), v(0, 1.12, 3.1), 0.02, strap)
+	rod(g, v(-0.32, 1.12, 1.95), v(0.32, 1.12, 1.95), 0.02, strap)
+	rod(g, v(sx - 0.22, 1.1, 0.04), v(-0.32, 1.12, 1.95), 0.01, M.black) -- reins
+	rod(g, v(sx + 0.22, 1.1, 0.04), v(0.32, 1.12, 1.95), 0.01, M.black)
+	return finish(model)
+end
+
+-- The Yeti: a big shaggy snow beast, about 4.6 m tall. Origin at its feet, faces -Z.
+function Models.BuildYeti(): Model
+	local model, g = newModel("Yeti")
+	local fur = st("#eef3fa", Enum.Material.Snow)
+	local shade = st("#d3dfee", Enum.Material.Snow)
+	local skin = st("#6f8fb3")
+	local dark = st("#22324a")
+	-- legs and feet
+	for _, x in { -0.45, 0.45 } do
+		blob(g, 0.7, 1.4, 0.75, fur, x, 0.9, 0)
+		blob(g, 0.6, 0.3, 0.9, skin, x, 0.15, 0.15)
+		for _, t in { -0.18, 0, 0.18 } do
+			ball(g, 0.07, st("#e9e2cf"), x + t, 0.1, 0.6)
+		end
+	end
+	-- body
+	blob(g, 2.0, 2.2, 1.5, fur, 0, 2.6, 0)
+	blob(g, 1.2, 1.3, 0.4, shade, 0, 2.5, 0.6) -- chest
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		blob(g, 0.5, 0.6, 0.5, fur, math.cos(a) * 0.9, 1.65, math.sin(a) * 0.65) -- shaggy fringe
+	end
+	-- arms
+	for _, sx in { -1, 1 } do
+		local arm = sub(g, sx * 1.05, 3.2, 0, 0, 0, sx * 0.25)
+		blob(arm, 0.7, 1.9, 0.7, fur, sx * 0.1, -0.9, 0)
+		blob(arm, 0.55, 0.45, 0.6, skin, sx * 0.2, -1.9, 0.05)
+		for _, t in { -0.15, 0, 0.15 } do
+			box(arm, 0.06, 0.18, 0.06, st("#e9e2cf"), sx * 0.2 + t, -2.15, 0.2, 0.4, 0, 0)
+		end
+	end
+	-- head
+	blob(g, 1.3, 1.15, 1.2, fur, 0, 4.05, 0.05)
+	blob(g, 0.9, 0.75, 0.3, skin, 0, 3.95, 0.55) -- face
+	blob(g, 0.24, 0.16, 0.08, st("#ffffff"), -0.2, 4.12, 0.7)
+	blob(g, 0.24, 0.16, 0.08, st("#ffffff"), 0.2, 4.12, 0.7)
+	ball(g, 0.06, st("#d50000", Enum.Material.Neon), -0.2, 4.12, 0.74)
+	ball(g, 0.06, st("#d50000", Enum.Material.Neon), 0.2, 4.12, 0.74)
+	box(g, 0.3, 0.06, 0.06, dark, -0.2, 4.25, 0.7, 0, 0, -0.35) -- angry brows
+	box(g, 0.3, 0.06, 0.06, dark, 0.2, 4.25, 0.7, 0, 0, 0.35)
+	blob(g, 0.5, 0.25, 0.1, dark, 0, 3.75, 0.68) -- mouth
+	for _, x in { -0.16, 0.16 } do
+		box(g, 0.07, 0.14, 0.04, st("#ffffff"), x, 3.82, 0.72) -- fangs
+	end
+	-- horns
+	local horn = st("#d9c9a3")
+	for _, sx in { -1, 1 } do
+		rod(g, v(sx * 0.45, 4.4, 0), v(sx * 0.8, 4.75, -0.1), 0.1, horn)
+		rod(g, v(sx * 0.8, 4.75, -0.1), v(sx * 0.85, 5.05, 0.15), 0.07, horn)
+	end
+	return finish(model)
+end
+
 -- Decorated plaza tree.
 function Models.BuildXmasTree(): Model
 	local model = Models.BuildPine(1.5)
@@ -1331,6 +1544,7 @@ export type Data = {
 	boosts: { sell: number, capacity: number },
 	auto: boolean,
 	totalSold: number,
+	tutorial: number, -- 1..5 = current tutorial step, 0 = finished
 }
 
 local function defaults(): Data
@@ -1346,6 +1560,7 @@ local function defaults(): Data
 		boosts = { sell = 0, capacity = 0 },
 		auto = false,
 		totalSold = 0,
+		tutorial = 1,
 	}
 end
 
@@ -1469,7 +1684,509 @@ return DataService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="7">
+      <Item class="ModuleScript" referent="7">
+        <Properties>
+          <string name="Name">EventService</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Timed events. Every Config.Events.Interval seconds this picks a random event from the
+-- modules in the Events folder and runs it. The current state goes into attributes on
+-- ReplicatedStorage.EventState, which the top-of-screen event bar reads.
+--
+-- To add an event, add a ModuleScript to src/server/Events that returns:
+--   {
+--     Name = "My Event",            -- shown at the top of the screen
+--     BarKind = "progress" | "hp",  -- green progress bar or red HP bar
+--     Weight = 1,                   -- optional: relative chance of being picked
+--     Duration = 300,               -- seconds before it times out
+--     Run = function(ev) ... return true end, -- true = players won
+--   }
+-- `ev` gives you helpers: ev.SetBar, ev.Announce, ev.Contribute, ev.TimeLeft, ev.AddZone,
+-- ev.OnSnowballHit, ev.AllowSnowballsForAll, ev.OnCleanup, ev.Billboard, plus
+-- ev.Config, ev.Models and ev.Snow (SnowService). See SantaSled.luau and Yeti.luau.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local E = Config.Events
+
+local EventService = {}
+
+local state = Instance.new("Folder")
+state.Name = "EventState"
+state.Parent = ReplicatedStorage
+
+local zones = {}
+local hitHandlers = {}
+local snowballsForAll = false
+
+-- ---------------------------------------------------------------- hooks used by Main / SnowballService
+-- an event clear-zone containing this point, if any: { boost = n, onCleared = fn(player, amount) }
+function EventService.ZoneAt(x: number, z: number)
+	for _, zn in zones do
+		local r = zn.rect
+		if x >= r[1] and x <= r[3] and z >= r[2] and z <= r[4] then
+			return zn
+		end
+	end
+	return nil
+end
+
+-- returns true if an event used the hit
+function EventService.HandleSnowballHit(inst: Instance, thrower: Player): boolean
+	for _, fn in hitHandlers do
+		if fn(inst, thrower) then
+			return true
+		end
+	end
+	return false
+end
+
+function EventService.SnowballsForAll(): boolean
+	return snowballsForAll
+end
+
+-- ---------------------------------------------------------------- helpers
+local function now(): number
+	return Workspace:GetServerTimeNow()
+end
+
+local function billboard(part: BasePart, title: string, sub: string?, height: number?)
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(260, 64)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, height or 6, 0)
+	bb.AlwaysOnTop = true
+	bb.LightInfluence = 0
+	bb.MaxDistance = 400
+	local function line(text, y, h, color)
+		local t = Instance.new("TextLabel")
+		t.BackgroundTransparency = 1
+		t.Position = UDim2.fromScale(0, y)
+		t.Size = UDim2.fromScale(1, h)
+		t.Font = Enum.Font.FredokaOne
+		t.TextScaled = true
+		t.Text = text
+		t.TextColor3 = color
+		t.TextStrokeTransparency = 0.2
+		t.Parent = bb
+	end
+	line(title, 0, if sub then 0.6 else 1, Color3.fromHex("#ffd54f"))
+	if sub then
+		line(sub, 0.6, 0.4, Color3.new(1, 1, 1))
+	end
+	bb.Parent = part
+	return bb
+end
+
+local function loadEvents()
+	local list = {}
+	local folder = script.Parent:WaitForChild("Events")
+	for _, m in folder:GetChildren() do
+		if m:IsA("ModuleScript") then
+			local ok, ev = pcall(require, m)
+			if ok and type(ev) == "table" and type(ev.Run) == "function" then
+				ev.Id = m.Name
+				table.insert(list, ev)
+			else
+				warn("[ClearTheSnow] event " .. m.Name .. " failed to load:", ev)
+			end
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.Id < b.Id
+	end)
+	return list
+end
+
+local function pick(list)
+	if E.OnlyEvent then
+		for _, ev in list do
+			if ev.Id == E.OnlyEvent then
+				return ev
+			end
+		end
+	end
+	local total = 0
+	for _, ev in list do
+		total += ev.Weight or 1
+	end
+	local roll = math.random() * total
+	for _, ev in list do
+		roll -= ev.Weight or 1
+		if roll <= 0 then
+			return ev
+		end
+	end
+	return list[1]
+end
+
+-- ---------------------------------------------------------------- running an event
+local function run(def, hooks)
+	local contributions: { [Player]: number } = {}
+	local cleanups = {}
+	local endsAt = now() + (def.Duration or 300)
+
+	state:SetAttribute("Title", def.Name)
+	state:SetAttribute("BarKind", def.BarKind or "progress")
+	state:SetAttribute("Progress", if def.BarKind == "hp" then 1 else 0)
+	state:SetAttribute("BarText", "")
+	state:SetAttribute("EndsAt", endsAt)
+	state:SetAttribute("Phase", "active")
+
+	local ev = {
+		Config = Config,
+		Models = Models,
+		Snow = hooks.SnowService,
+		Billboard = billboard,
+	}
+	function ev.TimeLeft(): number
+		return endsAt - now()
+	end
+	function ev.SetBar(fraction: number, text: string)
+		state:SetAttribute("Progress", math.clamp(fraction, 0, 1))
+		state:SetAttribute("BarText", text)
+	end
+	function ev.Announce(text: string, secs: number?)
+		hooks.Notify:FireAllClients("toast", text, secs or 4)
+	end
+	function ev.Contribute(player: Player, amount: number)
+		contributions[player] = (contributions[player] or 0) + amount
+	end
+	function ev.OnCleanup(fn)
+		table.insert(cleanups, fn)
+	end
+	-- players scooping inside rect clear snow `boost` times faster without filling their load
+	function ev.AddZone(rect: { number }, boost: number, onCleared)
+		table.insert(zones, { rect = rect, boost = boost, onCleared = onCleared })
+	end
+	-- fn(hitInstance, thrower) -> true if the hit counted for this event
+	function ev.OnSnowballHit(fn)
+		table.insert(hitHandlers, fn)
+	end
+	function ev.AllowSnowballsForAll(on: boolean)
+		snowballsForAll = on
+		state:SetAttribute("SnowballsForAll", on)
+	end
+
+	local ok, result = pcall(def.Run, ev)
+	if not ok then
+		warn("[ClearTheSnow] event " .. tostring(def.Id) .. " errored:", result)
+		result = false
+	end
+	for _, fn in cleanups do
+		pcall(fn)
+	end
+	table.clear(zones)
+	table.clear(hitHandlers)
+	ev.AllowSnowballsForAll(false)
+
+	if result == true then
+		for player, amount in contributions do
+			if player.Parent and amount > 0 then
+				local coins = hooks.reward(player)
+				hooks.Notify:FireClient(player, "toast", def.Name .. " complete! You earned " .. Config.FormatNumber(coins) .. " coins for helping.", 4)
+			end
+		end
+	end
+end
+
+function EventService.Init(hooks)
+	-- hooks: { Notify = RemoteEvent, SnowService = module, reward = fn(player) -> coins }
+	local list = loadEvents()
+	if #list == 0 then
+		return
+	end
+	local interval = if RunService:IsStudio() then E.StudioInterval else E.Interval
+	task.spawn(function()
+		while true do
+			state:SetAttribute("Phase", "waiting")
+			state:SetAttribute("NextAt", now() + interval)
+			task.wait(interval)
+			if #Players:GetPlayers() > 0 then
+				run(pick(list), hooks)
+			end
+		end
+	end)
+end
+
+return EventService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="8">
+        <Properties>
+          <string name="Name">Events</string>
+        </Properties>
+        <Item class="ModuleScript" referent="9">
+          <Properties>
+            <string name="Name">SantaSled</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Santa Sled Party: a stretch of the main road fills with deep snow that won't grow back
+-- by itself. Players clear it so Santa's sleigh can take off. Settings: Config.Events.SantaSled.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Config"))
+
+local Event = {
+	Name = "Santa Sled Party",
+	BarKind = "progress",
+	Weight = 1,
+	Duration = Config.Events.SantaSled.Duration,
+}
+
+local function pole(parent: Instance, pos: Vector3)
+	-- a red and white striped marker pole
+	for i = 0, 5 do
+		local p = Instance.new("Part")
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.Size = Vector3.new(0.6, 1, 0.6)
+		p.Material = Enum.Material.SmoothPlastic
+		p.Color = if i % 2 == 0 then Color3.fromHex("#d32f2f") else Color3.new(1, 1, 1)
+		p.CFrame = CFrame.new(pos + Vector3.new(0, 0.5 + i, 0))
+		p.Parent = parent
+	end
+	local top = Instance.new("Part")
+	top.Shape = Enum.PartType.Ball
+	top.Anchored = true
+	top.CanCollide = false
+	top.CanQuery = false
+	top.Material = Enum.Material.Neon
+	top.Color = Color3.fromHex("#ffd54f")
+	top.Size = Vector3.new(1, 1, 1)
+	top.CFrame = CFrame.new(pos + Vector3.new(0, 6.4, 0))
+	top.Parent = parent
+end
+
+function Event.Run(ev)
+	local cfg = ev.Config.Events.SantaSled
+	local r = cfg.Runway
+	local tiles = ev.Snow.TilesInRect(r)
+
+	-- deep snow on the runway, scaled to how many players there are
+	local per = math.clamp(cfg.SnowPerPlayer * #Players:GetPlayers(), cfg.SnowPerPlayer, ev.Config.TILE_MAX_UNITS)
+	ev.Snow.SetFrozen(tiles, true)
+	ev.Snow.Fill(tiles, per)
+	ev.OnCleanup(function()
+		ev.Snow.SetFrozen(tiles, false)
+	end)
+	local start = math.max(1, ev.Snow.Amount(tiles))
+
+	local folder = Instance.new("Folder")
+	folder.Name = "SantaSledEvent"
+	folder.Parent = Workspace
+	ev.OnCleanup(function()
+		folder:Destroy()
+	end)
+	for _, x in { r[1], r[3] } do
+		for _, z in { r[2], r[4] } do
+			pole(folder, Vector3.new(x, 0, z))
+		end
+	end
+	local sign = Instance.new("Part")
+	sign.Anchored, sign.CanCollide, sign.CanQuery, sign.Transparency = true, false, false, 1
+	sign.Size = Vector3.new(1, 1, 1)
+	sign.CFrame = CFrame.new((r[1] + r[3]) / 2, 4, (r[2] + r[4]) / 2)
+	sign.Parent = folder
+	ev.Billboard(sign, "SANTA'S RUNWAY", "Scoop the road clear!", 4)
+
+	local sleigh = ev.Models.BuildSleigh()
+	local base = CFrame.lookAt(cfg.SleighPosition, cfg.SleighPosition + Vector3.xAxis)
+	sleigh:PivotTo(base)
+	sleigh.Parent = folder
+	ev.Billboard(sleigh.PrimaryPart, "SANTA", "Waiting for a clear road", 9)
+
+	ev.AddZone(r, cfg.ClearBoost, function(player, amount)
+		ev.Contribute(player, amount)
+	end)
+	ev.Announce("Santa Sled Party! Clear the snow off the main road so Santa's sleigh can take off!", 5)
+
+	local won = false
+	while true do
+		local progress = 1 - ev.Snow.Amount(tiles) / start
+		local shown = math.clamp(progress / cfg.DoneAt, 0, 1)
+		ev.SetBar(shown, "Road cleared: " .. math.floor(shown * 100) .. "%")
+		if progress >= cfg.DoneAt then
+			won = true
+			break
+		end
+		if ev.TimeLeft() <= 0 then
+			break
+		end
+		-- reindeer get restless
+		sleigh:PivotTo(base * CFrame.new(0, math.abs(math.sin(os.clock() * 3)) * 0.15, 0))
+		task.wait(0.2)
+	end
+
+	if not won then
+		ev.SetBar(0, "Out of time!")
+		ev.Announce("Out of time! Santa's sleigh is stuck in the snow. Maybe next time.", 5)
+		task.wait(3)
+		return false
+	end
+
+	-- take off down the runway and up into the sky
+	ev.SetBar(1, "Ho ho ho! Santa is taking off!")
+	ev.Announce("You did it! Santa's sleigh is taking off!", 4)
+	local trail = Instance.new("Sparkles")
+	trail.SparkleColor = Color3.fromHex("#ffe9a8")
+	trail.Parent = sleigh.PrimaryPart
+	local t0 = os.clock()
+	while true do
+		local t = os.clock() - t0
+		if t > 8 then
+			break
+		end
+		local x = 4 * t + 3 * t * t
+		local y = math.max(0, t - 1.2) ^ 2 * 2.2
+		local pitch = math.clamp((t - 1.2) * 0.12, 0, 0.35)
+		sleigh:PivotTo(base * CFrame.new(0, y, -x) * CFrame.Angles(pitch, 0, 0))
+		RunService.Heartbeat:Wait()
+	end
+	return true
+end
+
+return Event
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="10">
+          <Properties>
+            <string name="Name">Yeti</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Yeti Abomination: a huge Yeti stomps onto the main road. Everyone can throw snowballs
+-- (Q) during this event, whatever tool they hold. Its HP is Config.Events.Yeti.HitsPerPlayer
+-- snowballs for every player in the server.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Config"))
+
+local Event = {
+	Name = "Yeti Abomination",
+	BarKind = "hp",
+	Weight = 1,
+	Duration = Config.Events.Yeti.Duration,
+}
+
+function Event.Run(ev)
+	local cfg = ev.Config.Events.Yeti
+	local maxHp = cfg.HitsPerPlayer * math.max(1, #Players:GetPlayers())
+	local hp = maxHp
+
+	-- more players joining makes it tougher
+	local joined = Players.PlayerAdded:Connect(function()
+		maxHp += cfg.HitsPerPlayer
+		hp += cfg.HitsPerPlayer
+	end)
+	ev.OnCleanup(function()
+		joined:Disconnect()
+	end)
+
+	local yeti = ev.Models.BuildYeti()
+	for _, p in yeti:GetDescendants() do
+		if p:IsA("BasePart") and p.Name ~= "Root" then
+			p.CanQuery = true -- snowballs can hit it
+			p.CanCollide = true
+		end
+	end
+	local pos = cfg.Position
+	local facing = CFrame.lookAt(pos, Vector3.new(0, 0, 0) * Vector3.new(1, 0, 1) + Vector3.new(0, pos.Y, 0))
+	yeti:PivotTo(facing * CFrame.new(0, -14, 0))
+	yeti.Parent = Workspace
+	ev.OnCleanup(function()
+		yeti:Destroy()
+	end)
+	ev.Billboard(yeti.PrimaryPart, "YETI", "Throw snowballs! (Q)", 17)
+
+	local flinch = 0
+	ev.AllowSnowballsForAll(true)
+	ev.OnSnowballHit(function(inst, thrower)
+		if hp > 0 and inst:IsDescendantOf(yeti) then
+			hp -= 1
+			flinch = 1
+			ev.Contribute(thrower, 1)
+			return true
+		end
+		return false
+	end)
+	ev.Announce("A Yeti Abomination is on the main road! Everyone can throw snowballs (Q). Knock it out!", 5)
+
+	-- rise out of the snow
+	for i = 1, 30 do
+		yeti:PivotTo(facing * CFrame.new(0, -14 + 14 * (i / 30), 0))
+		task.wait(1 / 30)
+	end
+
+	local won = false
+	local yaw = 0
+	while true do
+		local dt = RunService.Heartbeat:Wait()
+		ev.SetBar(hp / maxHp, "Yeti HP: " .. math.max(0, hp) .. " / " .. maxHp)
+		if hp <= 0 then
+			won = true
+			break
+		end
+		if ev.TimeLeft() <= 0 then
+			break
+		end
+		-- turn toward the nearest player
+		local best, bestD = nil, math.huge
+		for _, p in Players:GetPlayers() do
+			local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				local d = (hrp.Position - pos).Magnitude
+				if d < bestD then
+					best, bestD = hrp, d
+				end
+			end
+		end
+		if best then
+			local to = best.Position - pos
+			local want = math.atan2(-to.X, -to.Z)
+			local base = select(2, facing:ToOrientation())
+			local diff = (want - base - yaw + math.pi) % (2 * math.pi) - math.pi
+			yaw += diff * math.min(1, dt * 1.5)
+		end
+		flinch = math.max(0, flinch - dt * 5)
+		local stomp = math.abs(math.sin(os.clock() * 2)) * 0.5
+		yeti:PivotTo(facing * CFrame.Angles(0, yaw, 0) * CFrame.new(0, stomp, 0) * CFrame.Angles(-0.15 * flinch, 0, 0))
+	end
+
+	local finalCf = yeti:GetPivot()
+	if won then
+		ev.SetBar(0, "The Yeti is down!")
+		ev.Announce("The Yeti is knocked out! Great throwing, everyone!", 4)
+		for i = 1, 40 do
+			yeti:PivotTo(finalCf * CFrame.Angles(-math.rad(85) * (i / 40), 0, 0))
+			task.wait(1 / 30)
+		end
+		task.wait(1.5)
+		finalCf = yeti:GetPivot()
+	else
+		ev.Announce("The Yeti got away! It'll be back...", 4)
+	end
+	for i = 1, 45 do
+		yeti:PivotTo(finalCf * CFrame.new(0, -0.35 * i, 0))
+		task.wait(1 / 30)
+	end
+	return won
+end
+
+return Event
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="Script" referent="11">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -1489,6 +2206,9 @@ local Models = require(Shared.Models)
 local World = require(script.Parent.World)
 local SnowService = require(script.Parent.SnowService)
 local DataService = require(script.Parent.DataService)
+local SnowballService = require(script.Parent.SnowballService)
+local PresentService = require(script.Parent.PresentService)
+local EventService = require(script.Parent.EventService)
 
 local H = Config.Hub
 
@@ -1515,7 +2235,7 @@ local EquipTool = remoteFunction("EquipTool")
 local ClaimDaily = remoteFunction("ClaimDaily")
 local Spin = remoteFunction("Spin")
 local SellPile = remoteFunction("SellPile")
-remotes.Parent = ReplicatedStorage
+local TutorialAction = remoteEvent("TutorialAction")
 
 -- ------------------------------------------------------------------ world
 local blocks, hub = World.Build()
@@ -1575,13 +2295,52 @@ local function wheelCoins(d, seg): number
 	return math.max(10, math.floor(progressCoins(d) * 0.1 + 0.5)) * seg.mult
 end
 
+-- ------------------------------------------------------------------ tutorial
+-- Steps (see Config.Tutorial): 1 scoop until full, 2 toss on the pile, 3 sell,
+-- 4 buy the next tool, 5 "enjoy the game" card, 0 finished.
+local publish -- forward declaration
+
+local function setTutorial(player: Player, d, step: number)
+	if d.tutorial == step then
+		return
+	end
+	if step == 4 and not nextTool(d) then
+		step = 5 -- nothing left to buy
+	end
+	d.tutorial = step
+	if step == 5 then
+		task.delay(Config.Tutorial.EnjoySeconds, function()
+			local d2 = DataService.Get(player)
+			if d2 and d2.tutorial == 5 then
+				d2.tutorial = 0
+				publish(player)
+				task.spawn(DataService.Save, player)
+			end
+		end)
+	end
+end
+
+-- automatic steps, checked every frame
+local function tutorialTick(player: Player, d, cap: number)
+	local t = d.tutorial
+	if t == 1 and d.load >= math.max(1, cap) - 1e-6 then
+		setTutorial(player, d, 2)
+		t = 2
+	end
+	if (t == 1 or t == 2) and d.pile >= 1 then
+		setTutorial(player, d, 3)
+	end
+end
+
 -- ------------------------------------------------------------------ per-player runtime
 type Runtime = {
 	scooping: boolean,
-	visual: Model?,
-	weld: Weld?,
+	visual: Instance?, -- a Tool for hand tools, a welded Model for machines
+	tool: Tool?,
 	loadPart: BasePart?,
 	loadFull: number,
+	loadSize: Vector3?,
+	minFill: number,
 	front: number,
 	tilt: number,
 	dig: number,
@@ -1594,7 +2353,56 @@ type Runtime = {
 }
 local runtime: { [Player]: Runtime } = {}
 
-local function publish(player: Player)
+-- ------------------------------------------------------------------ snowballs and presents
+SnowballService.Init(remotes, {
+	-- only with Bare Hands equipped
+	canThrow = function(player)
+		local d = DataService.Get(player)
+		return d ~= nil and (d.equipped == "hands" or EventService.SnowballsForAll())
+	end,
+	onStun = function(player)
+		local r = runtime[player]
+		if r then
+			r.scooping = false
+		end
+	end,
+	onHit = function(inst, thrower)
+		return EventService.HandleSnowballHit(inst, thrower)
+	end,
+	walkSpeed = function(player)
+		local d = DataService.Get(player)
+		return Config.GetTool(if d then d.equipped else "hands").speed
+	end,
+})
+PresentService.Init(Notify, function(player)
+	-- coins for picking up a present: scales with your next upgrade
+	local d = DataService.Get(player)
+	if not d then
+		return 0
+	end
+	local coins = math.max(Config.Presents.MinCoins, math.floor(progressCoins(d) * Config.Presents.ProgressShare + 0.5))
+	d.coins += coins
+	publish(player)
+	return coins
+end)
+EventService.Init({
+	Notify = Notify,
+	SnowService = SnowService,
+	-- coins for helping with an event that succeeded
+	reward = function(player)
+		local d = DataService.Get(player)
+		if not d then
+			return 0
+		end
+		local coins = math.max(Config.Events.RewardMin, math.floor(progressCoins(d) * Config.Events.RewardShare + 0.5))
+		d.coins += coins
+		publish(player)
+		return coins
+	end,
+})
+remotes.Parent = ReplicatedStorage
+
+function publish(player: Player)
 	local d = DataService.Get(player)
 	if not d then
 		return
@@ -1616,6 +2424,7 @@ local function publish(player: Player)
 	player:SetAttribute("BoostSell", d.boosts.sell or 0)
 	player:SetAttribute("BoostCapacity", d.boosts.capacity or 0)
 	player:SetAttribute("Auto", d.auto)
+	player:SetAttribute("Tutorial", d.tutorial)
 	local ls = player:FindFirstChild("leaderstats")
 	if ls then
 		ls.Coins.Value = math.floor(d.coins)
@@ -1636,7 +2445,7 @@ local function clearVisual(player: Player, r: Runtime)
 		r.visual:Destroy()
 		r.visual = nil
 	end
-	r.weld = nil
+	r.tool = nil
 	r.loadPart = nil
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1679,22 +2488,45 @@ local function attachVisual(player: Player)
 	Models.Weld(model)
 	model.Name = "EquippedTool"
 
-	local weld = Instance.new("Weld")
+	r.loadPart = loadPart
+	r.loadFull = if loadPart then (loadPart:GetAttribute("FullHeight") or loadPart.Size.Y) else 1
+	r.loadSize = if loadPart then loadPart.Size else nil
+	r.minFill = if tool.id == "hands" then 0.45 else 0
+
 	if tool.kind == "hand" then
-		local hand = (char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")) :: BasePart?
-		if not hand then
-			model:Destroy()
-			return
-		end
-		local grip = hand:FindFirstChild("RightGripAttachment") :: Attachment?
-		local gripPos = if grip then grip.Position else Vector3.new(0, -hand.Size.Y / 2, 0)
-		local len = -minY -- blade length below the grip, in studs
-		local gripHeight = 2.4
-		r.tilt = if len > gripHeight - 0.3 then math.acos(math.clamp((gripHeight - 0.35) / len, -1, 0.99)) else 0.3
+		-- Hand tools become a real Roblox Tool, so the character holds it out in the
+		-- right hand with the standard hold pose. The model's Root part is the Handle.
+		local len = -minY -- shaft + blade length below the grip, in studs
+		r.tilt = if len > 3.4 then math.acos(math.clamp(3.4 / len, -1, 0.99)) else 0.35
 		r.front = 1.5 + tool.radius * 0.6
-		weld.Part0 = hand
-		weld.C0 = CFrame.new(gripPos) * CFrame.Angles(r.tilt, 0, 0)
+		local t = Instance.new("Tool")
+		t.Name = tool.name
+		t.ToolTip = tool.name
+		t.CanBeDropped = false
+		t.RequiresHandle = true
+		t.ManualActivationOnly = true
+		local handle = model.PrimaryPart :: BasePart
+		handle.Name = "Handle"
+		for _, c in model:GetChildren() do
+			c.Parent = t
+		end
+		model:Destroy()
+		t.Grip = CFrame.Angles(-r.tilt, 0, 0)
+		t.Parent = char -- parenting a Tool to the character equips it
+		-- keep it in hand if anything tries to unequip it
+		t.AncestryChanged:Connect(function()
+			if r.visual == t and t.Parent and t.Parent ~= char and char.Parent then
+				task.defer(function()
+					if r.visual == t and char.Parent then
+						t.Parent = char
+					end
+				end)
+			end
+		end)
+		r.visual = t
+		r.tool = t
 	else
+		local weld = Instance.new("Weld")
 		local seat = model:GetAttribute("SeatOffset") :: Vector3
 		local standing = model:GetAttribute("Standing") == true
 		local hrpHeight = groundToHrp
@@ -1717,14 +2549,11 @@ local function attachVisual(player: Player)
 		weld.Part0 = hrp
 		weld.C0 = CFrame.new(-seat.X, -hrpHeight, -seat.Z)
 		r.front = math.max(2, seat.Z - minZ - tool.radius * 0.5)
+		weld.Part1 = model.PrimaryPart
+		weld.Parent = model.PrimaryPart
+		model.Parent = char
+		r.visual = model
 	end
-	weld.Part1 = model.PrimaryPart
-	weld.Parent = model.PrimaryPart
-	model.Parent = char
-	r.visual = model
-	r.weld = weld
-	r.loadPart = loadPart
-	r.loadFull = if loadPart then (loadPart:GetAttribute("FullHeight") or loadPart.Size.Y) else 1
 	r.dig = 0
 	r.swing = -1
 end
@@ -1734,7 +2563,15 @@ local function updateLoadVisual(r: Runtime, fill: number)
 	if not p or not p.Parent then
 		return
 	end
-	if fill < 0.02 then
+	if r.minFill > 0 and r.loadSize then
+		-- bare hands: always hold a little snowball that grows as you scoop
+		local k = r.minFill + (1 - r.minFill) * math.clamp(fill, 0, 1)
+		local want = r.loadSize * k
+		if (p.Size - want).Magnitude > 0.02 then
+			p.Size = want
+		end
+		p.Transparency = 0
+	elseif fill < 0.02 then
 		p.Transparency = 1
 	else
 		p.Transparency = 0
@@ -1773,6 +2610,15 @@ local function sell(player: Player)
 	d.coins += coins
 	d.totalSold += units
 	d.pile -= units
+	if d.tutorial >= 1 and d.tutorial <= 3 then
+		local n = nextTool(d)
+		if Config.Tutorial.StarterBonus and n and Config.ToolIndex[n.id] == 2 and d.coins < n.price then
+			local bonus = n.price - d.coins
+			d.coins += bonus
+			Notify:FireClient(player, "toast", "Starter bonus: +" .. bonus .. " coins. Go buy the " .. n.name .. "!", 4)
+		end
+		setTutorial(player, d, 4)
+	end
 	publish(player)
 	Notify:FireClient(player, "sold", coins)
 	return coins
@@ -1824,6 +2670,19 @@ SetScooping.OnServerEvent:Connect(function(player, on)
 	end
 end)
 
+TutorialAction.OnServerEvent:Connect(function(player, action)
+	local d = DataService.Get(player)
+	if not d then
+		return
+	end
+	if action == "skip" then
+		d.tutorial = 0
+	elseif action == "replay" then
+		d.tutorial = 1
+	end
+	publish(player)
+end)
+
 SetAuto.OnServerEvent:Connect(function(player, on)
 	local d = DataService.Get(player)
 	if d then
@@ -1858,6 +2717,10 @@ BuyTool.OnServerInvoke = function(player, id)
 	table.insert(d.owned, id)
 	equip(player, id)
 	r.busy = false
+	if d.tutorial >= 1 and d.tutorial <= 4 then
+		setTutorial(player, d, 5)
+		publish(player)
+	end
 	task.spawn(DataService.Save, player)
 	return true, "You got the " .. tool.name .. "!"
 end
@@ -1953,6 +2816,7 @@ local function onPlayer(player: Player)
 	runtime[player] = {
 		scooping = false,
 		loadFull = 1,
+		minFill = 0,
 		front = 2,
 		tilt = 0,
 		dig = 0,
@@ -2015,18 +2879,30 @@ RunService.Heartbeat:Connect(function(dt)
 		local moving = hum.MoveDirection.Magnitude > 0.1
 		local wants = r.scooping or d.auto or (tool.kind == "machine" and moving)
 		local working = false
-		if wants and d.load < cap - 1e-6 then
+		local inZone = false
+		if wants then
 			local look = hrp.CFrame.LookVector
 			local flat = Vector3.new(look.X, 0, look.Z)
 			flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
 			local pos = hrp.Position + flat * r.front
-			local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
-			if got > 0 then
-				d.load = math.min(cap, d.load + got)
-				working = true
+			local zone = EventService.ZoneAt(pos.X, pos.Z)
+			if zone then
+				-- event clear-zone (e.g. Santa's runway): snow is shoveled aside, not carried
+				inZone = true
+				local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, tool.rate * dt * zone.boost)
+				if got > 0 then
+					zone.onCleared(player, got)
+					working = true
+				end
+			elseif d.load < cap - 1e-6 then
+				local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
+				if got > 0 then
+					d.load = math.min(cap, d.load + got)
+					working = true
+				end
 			end
 		end
-		if d.load >= cap - 1e-6 then
+		if d.load >= cap - 1e-6 and not inZone then
 			if wants and not r.fullWarned then
 				r.fullWarned = true
 				Notify:FireClient(player, "full")
@@ -2036,12 +2912,12 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 
 		-- digging motion for hand tools
-		if tool.kind == "hand" and r.weld and r.weld.Part0 then
+		if tool.kind == "hand" and r.tool then
 			r.dig = if working then r.dig + dt * 9 else 0
 			local swing = if working then (math.sin(r.dig) * 0.5 + 0.5) * 0.5 else 0
-			if math.abs(swing - r.swing) > 0.02 then
+			if math.abs(swing - r.swing) > 0.04 then
 				r.swing = swing
-				r.weld.C0 = CFrame.new(r.weld.C0.Position) * CFrame.Angles(r.tilt + swing, 0, 0)
+				r.tool.Grip = CFrame.Angles(-(r.tilt + swing), 0, 0)
 			end
 		end
 
@@ -2056,6 +2932,9 @@ RunService.Heartbeat:Connect(function(dt)
 			publish(player)
 		end
 
+		if d.tutorial > 0 then
+			tutorialTick(player, d, cap)
+		end
 		updateLoadVisual(r, d.load / cap)
 		if now - r.lastPublish > 0.15 then
 			r.lastPublish = now
@@ -2066,7 +2945,180 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">PresentService</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Christmas presents that drop from the sky every now and then. Each one floats down
+-- under a little parachute glow, lands somewhere in town, and the first player to walk
+-- into it gets bonus coins. Tuning: Config.Presents.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local P = Config.Presents
+
+local PresentService = {}
+
+local WRAPS = {
+	{ "#c62828", "#ffd54f" },
+	{ "#2e7d32", "#ffffff" },
+	{ "#1565c0", "#e0e0e0" },
+	{ "#8e24aa", "#ffd54f" },
+	{ "#ef6c00", "#c62828" },
+}
+
+local folder: Folder
+local live = {}
+local rng = Random.new()
+
+-- a spot on open ground (not a roof, not the market), or nil
+local function findSpot(): Vector3?
+	local half = Config.WORLD_SIZE / 2 * 0.85
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { folder }
+	for _ = 1, 15 do
+		local x, z = rng:NextNumber(-half, half), rng:NextNumber(-half, half)
+		local nearMarket = math.abs(x) < 45 and z > -40 and z < 15
+		if not nearMarket then
+			local hit = Workspace:Raycast(Vector3.new(x, 150, z), Vector3.new(0, -300, 0), params)
+			if hit and hit.Position.Y < 2 and not (hit.Instance.Parent and hit.Instance.Parent:FindFirstChildOfClass("Humanoid")) then
+				return hit.Position
+			end
+		end
+	end
+	return nil
+end
+
+local function spawnPresent(reward: (Player) -> number, notify: RemoteEvent)
+	local spot = findSpot()
+	if not spot then
+		return
+	end
+	local gift = Models.BuildGift()
+	local wrap = WRAPS[rng:NextInteger(1, #WRAPS)]
+	for _, p in gift:GetDescendants() do
+		if p:IsA("BasePart") and p.Name ~= "Root" then
+			p.Color = if p.Material == Enum.Material.Metal then Color3.fromHex(wrap[2]) else Color3.fromHex(wrap[1])
+			p.CanCollide = false
+			p.CanQuery = false
+		end
+	end
+	gift.Name = "Present"
+	-- glow so it can be spotted from a distance
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromHex("#ffe9a8")
+	light.Range = 14
+	light.Brightness = 2
+	light.Parent = gift.PrimaryPart
+	local sparkle = Instance.new("Sparkles")
+	sparkle.SparkleColor = Color3.fromHex("#fff3c4")
+	sparkle.Parent = gift.PrimaryPart
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(120, 30)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, 5.5, 0)
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = 160
+	bb.LightInfluence = 0
+	local tl = Instance.new("TextLabel")
+	tl.BackgroundTransparency = 1
+	tl.Size = UDim2.fromScale(1, 1)
+	tl.Font = Enum.Font.FredokaOne
+	tl.TextScaled = true
+	tl.Text = "PRESENT"
+	tl.TextColor3 = Color3.fromHex("#ffd54f")
+	tl.TextStrokeTransparency = 0.2
+	tl.Parent = bb
+	bb.Parent = gift.PrimaryPart
+
+	-- invisible pickup box
+	local hitbox = Instance.new("Part")
+	hitbox.Name = "Pickup"
+	hitbox.Anchored = true
+	hitbox.CanCollide = false
+	hitbox.CanQuery = false
+	hitbox.Transparency = 1
+	hitbox.Size = Vector3.new(6, 7, 6)
+	hitbox.Parent = gift
+
+	local entry = { model = gift, hitbox = hitbox, target = spot, y = spot.Y + 120, spin = rng:NextNumber(0, 6), landedAt = nil, taken = false }
+	local function place()
+		gift:PivotTo(CFrame.new(spot.X, entry.y, spot.Z) * CFrame.Angles(0, entry.spin, 0))
+		hitbox.CFrame = CFrame.new(spot.X, entry.y + 3, spot.Z)
+	end
+	place()
+	entry.place = place
+	gift.Parent = folder
+
+	hitbox.Touched:Connect(function(other)
+		if entry.taken then
+			return
+		end
+		local player = Players:GetPlayerFromCharacter(other.Parent)
+		local hum = other.Parent and other.Parent:FindFirstChildOfClass("Humanoid")
+		if not player or not hum or hum.Health <= 0 then
+			return
+		end
+		entry.taken = true
+		local coins = reward(player)
+		notify:FireClient(player, "present", coins)
+		gift:Destroy()
+	end)
+	table.insert(live, entry)
+end
+
+function PresentService.Init(notify: RemoteEvent, reward: (Player) -> number)
+	folder = Instance.new("Folder")
+	folder.Name = "Presents"
+	folder.Parent = Workspace
+
+	-- falling and cleanup
+	RunService.Heartbeat:Connect(function(dt)
+		local now = os.clock()
+		for i = #live, 1, -1 do
+			local e = live[i]
+			if e.taken or not e.model.Parent then
+				table.remove(live, i)
+			elseif not e.landedAt then
+				e.y = math.max(e.target.Y, e.y - P.FallSpeed * dt)
+				e.spin += dt * 1.2
+				e.place()
+				if e.y <= e.target.Y then
+					e.landedAt = now
+				end
+			elseif now - e.landedAt > P.Lifetime then
+				e.model:Destroy()
+				table.remove(live, i)
+			end
+		end
+	end)
+
+	-- drops
+	task.spawn(function()
+		while true do
+			task.wait(rng:NextNumber(P.Interval[1], P.Interval[2]))
+			if #Players:GetPlayers() > 0 and #live < P.MaxOnMap then
+				local n = math.min(rng:NextInteger(P.PerDrop[1], P.PerDrop[2]), P.MaxOnMap - #live)
+				for _ = 1, n do
+					spawnPresent(reward, notify)
+				end
+				notify:FireAllClients("toast", "Presents are falling from the sky! Grab them for bonus coins.", 3.5)
+			end
+		end
+	end)
+end
+
+return PresentService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">SnowService</string>
           <string name="Source"><![CDATA[--!strict
@@ -2088,6 +3140,7 @@ local REGROW_RATE = MAX / Config.REGROW_SECONDS
 local units: { number } = table.create(N * N, MAX)
 local blocked: { boolean } = table.create(N * N, false)
 local cooldown: { number } = table.create(N * N, 0)
+local frozen: { boolean } = table.create(N * N, false) -- events can stop tiles regrowing
 local parts: { [number]: BasePart } = {}
 local dirty: { [number]: boolean } = {}
 local folder: Folder
@@ -2173,7 +3226,7 @@ function SnowService.Init(rects: { { number } })
 		while true do
 			task.wait(step)
 			for k = 1, N * N do
-				if not blocked[k] and units[k] < MAX then
+				if not blocked[k] and not frozen[k] and units[k] < MAX then
 					if cooldown[k] > 0 then
 						cooldown[k] -= step
 					else
@@ -2235,6 +3288,50 @@ function SnowService.Harvest(x: number, z: number, radius: number, amount: numbe
 	return take
 end
 
+-- ---------------------------------------------------------------- helpers for events
+-- tile ids inside a rectangle { x0, z0, x1, z1 } (studs), skipping tiles without snow
+function SnowService.TilesInRect(r: { number }): { number }
+	local list = {}
+	local i0, j0 = tileOf(math.min(r[1], r[3]), math.min(r[2], r[4]))
+	local i1, j1 = tileOf(math.max(r[1], r[3]) - 0.01, math.max(r[2], r[4]) - 0.01)
+	for j = math.max(0, j0), math.min(N - 1, j1) do
+		for i = math.max(0, i0), math.min(N - 1, i1) do
+			local k = idx(i, j)
+			if not blocked[k] then
+				table.insert(list, k)
+			end
+		end
+	end
+	return list
+end
+
+-- stop (or restart) regrowth on these tiles
+function SnowService.SetFrozen(list: { number }, on: boolean)
+	for _, k in list do
+		frozen[k] = on
+		if not on then
+			cooldown[k] = 0
+		end
+	end
+end
+
+-- set these tiles to an exact amount of snow (0..TILE_MAX_UNITS)
+function SnowService.Fill(list: { number }, amount: number)
+	for _, k in list do
+		units[k] = math.clamp(amount, 0, MAX)
+		dirty[k] = true
+	end
+end
+
+-- total snow on these tiles
+function SnowService.Amount(list: { number }): number
+	local t = 0
+	for _, k in list do
+		t += units[k]
+	end
+	return t
+end
+
 function SnowService.DepthAt(x: number, z: number): number
 	local i, j = tileOf(x, z)
 	if i < 0 or j < 0 or i >= N or j >= N then
@@ -2247,7 +3344,141 @@ return SnowService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="14">
+        <Properties>
+          <string name="Name">SnowballService</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Snowball fights. With Bare Hands equipped a player can throw snowballs. The server
+-- flies each snowball itself (raycasting along its arc) and decides hits, so clients
+-- can't fake them. Every client draws the snowball and the stumble. Tuning: Config.Snowball.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local SB = Config.Snowball
+
+local SnowballService = {}
+
+-- canThrow(player) -> boolean ; onStun(player, seconds) ; walkSpeed(player) -> number
+-- onHit(instance, thrower) -> boolean (true = an event used the hit)
+function SnowballService.Init(remotes: Folder, hooks)
+	local throwRemote = Instance.new("RemoteEvent")
+	throwRemote.Name = "ThrowSnowball"
+	throwRemote.Parent = remotes
+	local fx = Instance.new("RemoteEvent") -- to all clients: "throw" and "stun"
+	fx.Name = "SnowballFx"
+	fx.Parent = remotes
+
+	local lastThrow: { [Player]: number } = {}
+	local stunnedUntil: { [Player]: number } = {}
+	local flying = {}
+
+	local function stun(victim: Player, thrower: Player)
+		local now = os.clock()
+		if (stunnedUntil[victim] or 0) + SB.ImmuneSeconds > now then
+			return -- still stunned or briefly immune, so nobody gets stun-locked
+		end
+		local char = victim.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then
+			return
+		end
+		stunnedUntil[victim] = now + SB.StunSeconds
+		hooks.onStun(victim, SB.StunSeconds)
+		hum.WalkSpeed = 0
+		hum.JumpPower = 0
+		hum.JumpHeight = 0
+		fx:FireAllClients("stun", char, SB.StunSeconds, thrower.Name, victim)
+		task.delay(SB.StunSeconds, function()
+			if hum.Parent and stunnedUntil[victim] and stunnedUntil[victim] <= os.clock() + 0.01 then
+				hum.WalkSpeed = hooks.walkSpeed(victim)
+				hum.JumpPower = 50
+				hum.JumpHeight = 7.2
+			end
+		end)
+	end
+
+	function SnowballService.IsStunned(player: Player): boolean
+		return (stunnedUntil[player] or 0) > os.clock()
+	end
+
+	throwRemote.OnServerEvent:Connect(function(player, dir)
+		if typeof(dir) ~= "Vector3" or dir.Magnitude < 0.1 or dir.Magnitude ~= dir.Magnitude or dir.Magnitude > 1e4 then
+			return
+		end
+		local now = os.clock()
+		if now - (lastThrow[player] or 0) < SB.Cooldown or SnowballService.IsStunned(player) or not hooks.canThrow(player) then
+			return
+		end
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hrp or not hum or hum.Health <= 0 then
+			return
+		end
+		lastThrow[player] = now
+		dir = dir.Unit
+		local hand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
+		local origin = (if hand then hand.Position else hrp.Position + Vector3.new(0, 1.5, 0)) + dir * 1.5
+		local velocity = dir * SB.Speed + Vector3.new(0, SB.Speed * 0.08, 0)
+		-- throw animation: the default Animate script plays its tool swing on this value
+		local tool = char:FindFirstChildOfClass("Tool")
+		if tool then
+			local anim = Instance.new("StringValue")
+			anim.Name = "toolanim"
+			anim.Value = "Slash"
+			anim.Parent = tool
+			task.delay(0.5, function()
+				anim:Destroy()
+			end)
+		end
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { char }
+		table.insert(flying, { thrower = player, pos = origin, vel = velocity, t = 0, params = params })
+		fx:FireAllClients("throw", player, origin, velocity, Workspace:GetServerTimeNow())
+	end)
+
+	RunService.Heartbeat:Connect(function(dt)
+		for i = #flying, 1, -1 do
+			local b = flying[i]
+			b.t += dt
+			local vel = b.vel + Vector3.new(0, -SB.Gravity * dt, 0)
+			local step = (b.vel + vel) * 0.5 * dt
+			b.vel = vel
+			local hit = Workspace:Spherecast(b.pos, SB.Radius, step, b.params)
+			if hit then
+				table.remove(flying, i)
+				if hooks.onHit and hooks.onHit(hit.Instance, b.thrower) then
+					continue -- an event (like the Yeti) took the hit
+				end
+				local model = hit.Instance:FindFirstAncestorOfClass("Model")
+				local victim = model and Players:GetPlayerFromCharacter(model)
+				if victim and victim ~= b.thrower then
+					stun(victim, b.thrower)
+				end
+			elseif b.t > SB.MaxFlightTime then
+				table.remove(flying, i)
+			else
+				b.pos += step
+			end
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(p)
+		lastThrow[p] = nil
+		stunnedUntil[p] = nil
+	end)
+end
+
+return SnowballService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">World</string>
           <string name="Source"><![CDATA[--!nonstrict
@@ -2638,7 +3869,7 @@ function World.BuildHub(root: Instance)
 		click.Parent = hit
 		local pp = prompt(hit, "Inspect", tool.name, 7)
 		pp.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-		local title, sub = billboard(hit, tool.name, "🪙 " .. Config.FormatNumber(tool.price), bsize.Y / 2 + 1.4, 150)
+		local title, sub = billboard(hit, tool.name, Config.FormatNumber(tool.price) .. " coins", bsize.Y / 2 + 1.4, 150)
 		title.Name = "Title"
 		sub.Name = "Subtitle"
 		holder.Parent = displayFolder
@@ -2711,203 +3942,997 @@ return World
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="10">
+  <Item class="StarterPlayer" referent="16">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="11">
+    <Item class="StarterPlayerScripts" referent="17">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="12">
+      <Item class="Folder" referent="18">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="13">
+        <Item class="LocalScript" referent="19">
           <Properties>
             <string name="Name">Client</string>
             <string name="Source"><![CDATA[--!nonstrict
--- Clear the Snow: client. Input, HUD, shopping list, daily rewards, spin wheel,
--- and local-only effects (your own snow pile mound, display turntables, snowfall).
+-- Clear the Snow: client entry point. It loads the UI modules, wires the side buttons,
+-- handles input and listens for messages from the server.
+--
+--   UI/Theme.luau       colours, fonts, drawn icons (coin, arrow)
+--   UI/Panels.luau      the ScreenGui and the pop-up window frame
+--   UI/Hud.luau         coins, pile, load bar, side buttons, toasts
+--   UI/ShopPanel.luau   shopping list
+--   UI/DailyPanel.luau  daily rewards
+--   UI/SpinPanel.luau   lucky spin wheel
+--   UI/HelpPanel.luau   how to play
+--   UI/EventBar.luau    event countdown and progress / HP bar at the top
+--   Tutorial.luau       step-by-step tutorial with arrows
+--   Snowballs.luau      snowball throwing (Bare Hands), flight visuals, stumble
+--   WorldEffects.luau   pile mound, snowfall, display labels and turntables
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+local UI = script.Parent:WaitForChild("UI")
+local Panels = require(UI.Panels)
+local Hud = require(UI.Hud)
+local Shop = require(UI.ShopPanel)
+local Daily = require(UI.DailyPanel)
+local Spin = require(UI.SpinPanel)
+local Help = require(UI.HelpPanel)
+require(UI.EventBar)
+require(script.Parent:WaitForChild("Tutorial"))
+require(script.Parent:WaitForChild("Snowballs"))
+local WorldEffects = require(script.Parent:WaitForChild("WorldEffects"))
+
+local player = Players.LocalPlayer
+local fmt = Config.FormatNumber
+
+-- the game equips tools itself, so hide the default backpack bar
+pcall(function()
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
+
+-- ---------------------------------------------------------------- side buttons
+Hud.shopBtn.Activated:Connect(function()
+	Shop.open()
+end)
+Hud.dailyBtn.Activated:Connect(Daily.open)
+Hud.spinBtn.Activated:Connect(Spin.open)
+Hud.helpBtn.Activated:Connect(Help.open)
+Hud.autoBtn.Activated:Connect(function()
+	Remotes.SetAuto:FireServer(not player:GetAttribute("Auto"))
+end)
+
+-- ---------------------------------------------------------------- refresh UI when attributes change
+local function refresh()
+	Hud.refresh()
+	if Shop.panel.Visible then
+		Shop.render()
+	end
+	if Daily.panel.Visible then
+		Daily.render()
+	end
+	if Spin.panel.Visible and not Spin.isSpinning() then
+		Spin.render()
+	end
+end
+for _, a in { "Coins", "Load", "Capacity", "Pile", "Equipped", "Owned", "Spins", "DailyCanClaim", "Auto", "BoostSell", "BoostCapacity" } do
+	player:GetAttributeChangedSignal(a):Connect(refresh)
+end
+task.spawn(function()
+	while true do
+		task.wait(1)
+		refresh()
+	end
+end)
+
+-- ---------------------------------------------------------------- input: hold to scoop
+local held = { mouse = false, key = false, touch = false }
+local function sendScoop()
+	Remotes.SetScooping:FireServer(held.mouse or held.key or held.touch)
+end
+if Panels.isTouch then
+	Hud.makeScoopButton(function(on)
+		held.touch = on
+		sendScoop()
+	end)
+end
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		held.mouse = true
+		sendScoop()
+	elseif input.KeyCode == Enum.KeyCode.F then
+		held.key = true
+		sendScoop()
+	elseif input.KeyCode == Enum.KeyCode.R then
+		Remotes.SetAuto:FireServer(not player:GetAttribute("Auto"))
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		held.mouse = false
+		sendScoop()
+	elseif input.KeyCode == Enum.KeyCode.F then
+		held.key = false
+		sendScoop()
+	end
+end)
+
+-- ---------------------------------------------------------------- messages from the server
+Remotes.Notify.OnClientEvent:Connect(function(kind, a, b)
+	if kind == "toast" then
+		Hud.toast(a, b)
+	elseif kind == "open" then
+		if a == "shop" then
+			Shop.open(b)
+		elseif a == "daily" then
+			Daily.open()
+		elseif a == "spin" then
+			Spin.open()
+		end
+	elseif kind == "dumped" then
+		Hud.floater("+" .. fmt(a) .. " snow on the pile", Color3.new(1, 1, 1))
+	elseif kind == "present" then
+		Hud.floater("Present! +" .. fmt(a) .. " coins", Color3.fromHex("#ffd54f"))
+		Hud.toast("You opened a present: +" .. fmt(a) .. " coins!", 2.5)
+	elseif kind == "sold" then
+		Hud.floater("+" .. fmt(a) .. " coins")
+	elseif kind == "full" then
+		local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
+		Hud.toast(if tool.kind == "machine" then "Machine full! Drive to the Snow Pile." else "Hands full! Take it to the Snow Pile.")
+	end
+end)
+
+-- ---------------------------------------------------------------- first load
+task.spawn(function()
+	while not player:GetAttribute("Ready") do
+		task.wait(0.5)
+	end
+	refresh()
+	WorldEffects.refreshDisplays()
+end)
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="20">
+          <Properties>
+            <string name="Name">Snowballs</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Snowball fights on the client: Q (or the THROW button on touch screens) throws a
+-- snowball while Bare Hands are equipped. The server decides hits; this script draws
+-- every snowball in flight and the stumble when someone gets hit.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local CollectionService = game:GetService("CollectionService")
-local StarterGui = game:GetService("StarterGui")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
-local player = Players.LocalPlayer
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Config = require(Shared.Config)
-local Models = require(Shared.Models)
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local fmt = Config.FormatNumber
-local H = Config.Hub
+local Theme = require(script.Parent.UI.Theme)
+local Panels = require(script.Parent.UI.Panels)
+local Hud = require(script.Parent.UI.Hud)
+local SB = Config.Snowball
 
-pcall(function()
-	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local ThrowRemote = Remotes:WaitForChild("ThrowSnowball")
+local Fx = Remotes:WaitForChild("SnowballFx")
+
+local Snowballs = {}
+
+local eventState = ReplicatedStorage:WaitForChild("EventState")
+
+-- Bare Hands can always throw; during some events (the Yeti) everyone can
+local function hasHands(): boolean
+	return player:GetAttribute("Equipped") == "hands" or eventState:GetAttribute("SnowballsForAll") == true
+end
+
+-- ---------------------------------------------------------------- throwing
+local lastThrow = 0
+local function throw()
+	if not hasHands() or os.clock() - lastThrow < SB.Cooldown then
+		return
+	end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return
+	end
+	lastThrow = os.clock()
+	local dir
+	if Panels.isTouch then
+		dir = Workspace.CurrentCamera.CFrame.LookVector
+	else
+		dir = mouse.Hit.Position - (hrp.Position + Vector3.new(0, 1.5, 0))
+	end
+	if dir.Magnitude < 0.1 then
+		dir = hrp.CFrame.LookVector
+	end
+	ThrowRemote:FireServer(dir.Unit)
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if not processed and input.KeyCode == Enum.KeyCode.Q then
+		throw()
+	end
 end)
 
--- ------------------------------------------------------------------ ui helpers
-local C = {
-	panel = Color3.fromRGB(18, 36, 66),
-	panel2 = Color3.fromRGB(32, 58, 98),
-	accent = Color3.fromHex("#ffd54f"),
-	good = Color3.fromHex("#3cc48a"),
-	bad = Color3.fromHex("#e0505a"),
-	text = Color3.fromRGB(243, 247, 255),
-	muted = Color3.fromRGB(169, 187, 214),
-	ink = Color3.fromRGB(15, 30, 55),
-}
+local throwBtn
+if Panels.isTouch then
+	throwBtn = Theme.button({
+		Text = "THROW",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -16, 1, -214),
+		Size = UDim2.fromOffset(84, 84),
+		BackgroundColor3 = Color3.fromRGB(240, 246, 255),
+		Visible = false,
+		Parent = Panels.gui,
+	})
+	throwBtn:FindFirstChildOfClass("UICorner").CornerRadius = UDim.new(1, 0)
+	throwBtn.Activated:Connect(throw)
+end
+local function refreshButton()
+	if throwBtn then
+		throwBtn.Visible = hasHands()
+	end
+end
+player:GetAttributeChangedSignal("Equipped"):Connect(refreshButton)
+eventState:GetAttributeChangedSignal("SnowballsForAll"):Connect(refreshButton)
+refreshButton()
 
-local function new(className: string, props: { [string]: any }?, children: { Instance }?): any
-	local inst = Instance.new(className)
-	for k, v in props or {} do
-		if k ~= "Parent" then
-			(inst :: any)[k] = v
+-- ---------------------------------------------------------------- snowballs in flight
+local function flyBall(origin: Vector3, velocity: Vector3, thrower: Player)
+	local ball = Instance.new("Part")
+	ball.Shape = Enum.PartType.Ball
+	ball.Size = Vector3.new(1, 1, 1) * SB.Radius * 2
+	ball.Material = Enum.Material.Snow
+	ball.Color = Color3.fromRGB(248, 251, 255)
+	ball.Anchored = true
+	ball.CanCollide = false
+	ball.CanQuery = false
+	ball.CanTouch = false
+	ball.CastShadow = false
+	ball.Parent = Workspace
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { ball, thrower.Character }
+	local pos, vel, t = origin, velocity, 0
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		t += dt
+		local nv = vel + Vector3.new(0, -SB.Gravity * dt, 0)
+		local step = (vel + nv) * 0.5 * dt
+		vel = nv
+		local hit = Workspace:Raycast(pos, step, params)
+		if hit or t > SB.MaxFlightTime then
+			conn:Disconnect()
+			if hit then
+				-- little puff of snow
+				local puff = Instance.new("Part")
+				puff.Shape = Enum.PartType.Ball
+				puff.Anchored, puff.CanCollide, puff.CanQuery, puff.CanTouch = true, false, false, false
+				puff.Material = Enum.Material.Snow
+				puff.Color = ball.Color
+				puff.Size = Vector3.new(2.2, 2.2, 2.2)
+				puff.CFrame = CFrame.new(hit.Position)
+				puff.Transparency = 0.3
+				puff.Parent = Workspace
+				game:GetService("TweenService"):Create(puff, TweenInfo.new(0.35), { Size = Vector3.new(3.6, 3.6, 3.6), Transparency = 1 }):Play()
+				game:GetService("Debris"):AddItem(puff, 0.4)
+			end
+			ball:Destroy()
+			return
+		end
+		pos += step
+		ball.CFrame = CFrame.new(pos)
+	end)
+end
+
+-- ---------------------------------------------------------------- stumble
+-- Tips the character's root joint back and forth for the stun time. Every client runs
+-- this for the stunned character, so everyone sees the stumble.
+local function stumble(char: Model, seconds: number)
+	local joint = (char:FindFirstChild("LowerTorso") and char.LowerTorso:FindFirstChild("Root"))
+		or (char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart:FindFirstChild("RootJoint"))
+	if not joint or not joint:IsA("Motor6D") then
+		return
+	end
+	local isR6 = joint.Name == "RootJoint"
+	local t0 = os.clock()
+	local total = seconds + 0.25
+	local conn
+	conn = RunService.Stepped:Connect(function()
+		local k = (os.clock() - t0) / total
+		if k >= 1 or not joint.Parent then
+			conn:Disconnect()
+			return
+		end
+		local fade = math.sin(k * math.pi)
+		local back = math.rad(-28) * fade -- lean back from the hit
+		local wobble = math.rad(14) * math.sin(k * math.pi * 4) * fade
+		local tilt = if isR6 then CFrame.Angles(-back, wobble, 0) else CFrame.Angles(back, 0, wobble)
+		joint.Transform = joint.Transform * tilt
+	end)
+end
+
+Fx.OnClientEvent:Connect(function(kind, a, b, c, d, e)
+	if kind == "throw" then
+		local thrower, origin, velocity, sentAt = a, b, c, d
+		if typeof(origin) == "Vector3" and typeof(velocity) == "Vector3" and thrower then
+			-- skip ahead by the network delay so the ball lines up with the server's
+			local lag = math.clamp(Workspace:GetServerTimeNow() - (sentAt or 0), 0, 0.3)
+			flyBall(origin + velocity * lag, velocity, thrower)
+		end
+	elseif kind == "stun" then
+		local char, seconds, throwerName, victim = a, b, c, d
+		if typeof(char) == "Instance" then
+			stumble(char, seconds)
+		end
+		if victim == player then
+			Hud.toast("Splat! " .. tostring(throwerName) .. " hit you with a snowball!", 1.6)
+		elseif throwerName == player.Name and victim then
+			Hud.floater("Direct hit on " .. victim.DisplayName .. "!", Color3.new(1, 1, 1))
 		end
 	end
-	for _, c in children or {} do
-		c.Parent = inst
-	end
-	if props and props.Parent then
-		inst.Parent = props.Parent
-	end
-	return inst
-end
-local function corner(r: number?)
-	return new("UICorner", { CornerRadius = UDim.new(0, r or 12) })
-end
-local function pad(px: number)
-	return new("UIPadding", {
-		PaddingTop = UDim.new(0, px),
-		PaddingBottom = UDim.new(0, px),
-		PaddingLeft = UDim.new(0, px),
-		PaddingRight = UDim.new(0, px),
-	})
-end
-local function label(props)
-	local base = {
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		TextColor3 = C.text,
-		TextScaled = true,
-	}
-	for k, v in props do
-		base[k] = v
-	end
-	return new("TextLabel", base)
-end
-local function button(props)
-	local base = {
-		AutoButtonColor = true,
-		BackgroundColor3 = C.accent,
-		Font = Enum.Font.FredokaOne,
-		TextColor3 = C.ink,
-		TextScaled = true,
-	}
-	for k, v in props do
-		base[k] = v
-	end
-	local b = new("TextButton", base, { corner(12) })
-	return b
-end
+end)
 
-local gui = new("ScreenGui", {
-	Name = "ClearTheSnowUI",
-	ResetOnSpawn = false,
-	IgnoreGuiInset = false,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-	Parent = player:WaitForChild("PlayerGui"),
+return Snowballs
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="21">
+          <Properties>
+            <string name="Name">Tutorial</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Hands-on tutorial: a card at the top of the screen says what to do, a yellow arrow
+-- floats over where to go, a line on the ground leads there, and an arrow at the edge of
+-- the screen points the way when the target is out of view.
+--
+-- The server decides the current step (player attribute "Tutorial": 1..5, 0 = done) and
+-- moves it on as you play. The step text lives in Config.Tutorial.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
+local Workspace = game:GetService("Workspace")
+local GuiService = game:GetService("GuiService")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Theme = require(script.Parent.UI.Theme)
+local Panels = require(script.Parent.UI.Panels)
+local Hud = require(script.Parent.UI.Hud)
+local Shop = require(script.Parent.UI.ShopPanel)
+local C, new, label, button = Theme.C, Theme.new, Theme.label, Theme.button
+local H = Config.Hub
+
+local player = Players.LocalPlayer
+local gui = Panels.gui
+local TOTAL = 4 -- steps that have a task (step 5 is the "enjoy" card)
+
+local Tutorial = {}
+
+-- ---------------------------------------------------------------- the step card
+local card = new("Frame", {
+	Name = "TutorialCard",
+	BackgroundColor3 = C.panel,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 10),
+	Size = UDim2.fromOffset(480, 104),
+	Visible = false,
+	ZIndex = 20,
+	Parent = gui,
+}, { Theme.corner(16), Theme.pad(12), new("UIStroke", { Color = C.accent, Thickness = 3 }), new("UISizeConstraint", { MaxSize = Vector2.new(480, 104) }) })
+local stepText = label({ Text = "STEP 1 OF 4", Size = UDim2.new(1, -80, 0, 16), TextColor3 = C.accent, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = card })
+local titleText = label({ Text = "", Position = UDim2.fromOffset(0, 18), Size = UDim2.new(1, 0, 0, 30), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = card })
+local bodyText = label({ Text = "", Position = UDim2.fromOffset(0, 50), Size = UDim2.new(1, 0, 0, 30), Font = Theme.BodyFont, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 21, Parent = card })
+local skip = button({ Text = "Skip", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Size = UDim2.fromOffset(64, 24), BackgroundColor3 = C.panel2, TextColor3 = C.muted, ZIndex = 22, Parent = card })
+skip.Activated:Connect(function()
+	Remotes.TutorialAction:FireServer("skip")
+end)
+
+-- ---------------------------------------------------------------- arrow at the screen edge
+local edgeArrow = Theme.arrow(64, C.accent, 30)
+edgeArrow.Visible = false
+edgeArrow.Parent = gui
+
+-- ---------------------------------------------------------------- arrow over the target in the world
+local marker = new("Part", {
+	Name = "TutorialMarker",
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Transparency = 1,
+	Size = Vector3.new(1, 1, 1),
+	Parent = Workspace,
 })
-local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local markerGui = new("BillboardGui", {
+	Size = UDim2.fromOffset(170, 150),
+	StudsOffsetWorldSpace = Vector3.new(0, 5, 0),
+	AlwaysOnTop = true,
+	LightInfluence = 0,
+	MaxDistance = 1e5,
+	Enabled = false,
+	Parent = marker,
+})
+local markerLabel = label({ Text = "", Size = UDim2.new(1, 0, 0, 46), Font = Theme.TitleFont, TextStrokeTransparency = 0.2, TextColor3 = C.accent, Parent = markerGui })
+local markerArrow = Theme.arrow(70, C.accent, 2)
+markerArrow.Parent = markerGui
 
--- ------------------------------------------------------------------ HUD
+-- a glowing line on the ground from you to the target
+local groundAttach = new("Attachment", { Position = Vector3.new(0, 0.4, 0), Parent = marker })
+local playerAttach = new("Attachment", { Name = "TutorialBeamStart" })
+local beam = new("Beam", {
+	Attachment0 = playerAttach,
+	Attachment1 = groundAttach,
+	Color = ColorSequence.new(C.accent),
+	LightEmission = 1,
+	LightInfluence = 0,
+	Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(0.15, 0.2), NumberSequenceKeypoint.new(1, 0.2) }),
+	Width0 = 0.6,
+	Width1 = 0.6,
+	FaceCamera = true,
+	Segments = 1,
+	Enabled = false,
+	Parent = marker,
+})
+local function hookCharacter(char: Model)
+	local hrp = char:WaitForChild("HumanoidRootPart", 10)
+	if hrp then
+		playerAttach.Position = Vector3.new(0, -2.6, 0)
+		playerAttach.Parent = hrp
+	end
+end
+player.CharacterAdded:Connect(hookCharacter)
+if player.Character then
+	task.spawn(hookCharacter, player.Character)
+end
+
+-- ---------------------------------------------------------------- where each step points
+local snowTarget: BasePart? = nil
+local lastSnowSearch = 0
+
+-- nearest tile that still has a good amount of snow on it
+local function findSnow(from: Vector3): BasePart?
+	local folder = Workspace:FindFirstChild("Snow")
+	if not folder then
+		return nil
+	end
+	local best, bestD = nil, math.huge
+	for _, p in folder:GetChildren() do
+		if p:IsA("BasePart") and p.Transparency < 0.5 and p.Size.Y > 1.4 then
+			local d = (p.Position - from).Magnitude
+			if d < bestD then
+				best, bestD = p, d
+			end
+		end
+	end
+	return best
+end
+
+local function displayFor(id: string): BasePart?
+	for _, holder in CollectionService:GetTagged("ToolDisplay") do
+		if holder:GetAttribute("ToolId") == id then
+			return holder:FindFirstChild("Hit")
+		end
+	end
+	return nil
+end
+
+-- returns ground position, label, and whether to hide guidance when you're close
+local function targetFor(step: number, hrp: BasePart): (Vector3?, string?, boolean)
+	if step == 1 then
+		local now = os.clock()
+		if not snowTarget or snowTarget.Size.Y < 0.8 or snowTarget.Transparency > 0.5 or now - lastSnowSearch > 4 then
+			lastSnowSearch = now
+			snowTarget = findSnow(hrp.Position)
+		end
+		if snowTarget then
+			return Vector3.new(snowTarget.Position.X, 0, snowTarget.Position.Z), "SNOW", true
+		end
+		return nil, nil, true
+	elseif step == 2 then
+		return H.Pile, "SNOW PILE", false
+	elseif step == 3 then
+		return H.Sell + Vector3.new(0, 0, 4), "SNOW BUYER", false
+	elseif step == 4 then
+		local id = Shop.nextToolId()
+		local hit = id and displayFor(id)
+		if hit then
+			return Vector3.new(hit.Position.X, 0, hit.Position.Z), "BUY: " .. Config.GetTool(id).name, false
+		end
+		return H.Shop + Vector3.new(0, 0, 4), "TOOL SHOP", false
+	end
+	return nil, nil, false
+end
+
+-- ---------------------------------------------------------------- card text
+local function stepInfo(step: number)
+	local s = Config.Tutorial.Steps[step]
+	if not s then
+		return "", ""
+	end
+	local text = if Panels.isTouch and s.touchText then s.touchText else s.text
+	if step == 4 then
+		local id = Shop.nextToolId()
+		text = string.format(text, if id then Config.GetTool(id).name else "next tool")
+	end
+	return s.title, text
+end
+
+local current = -1
+local function showStep(step: number)
+	if step == current then
+		return
+	end
+	local prev = current
+	current = step
+	snowTarget = nil
+	if step >= 1 and step <= 5 then
+		local title, text = stepInfo(step)
+		titleText.Text = title
+		bodyText.Text = text
+		stepText.Text = if step <= TOTAL then "STEP " .. step .. " OF " .. TOTAL else "TUTORIAL COMPLETE"
+		skip.Visible = step <= TOTAL
+		card.Visible = true
+		if prev >= 1 and step > prev then
+			Hud.floater(if step == 5 then "Enjoy the game!" else "Nice! Next step", C.good)
+		end
+	else
+		card.Visible = false
+	end
+end
+
+local function hideGuides()
+	markerGui.Enabled = false
+	beam.Enabled = false
+	edgeArrow.Visible = false
+end
+
+-- place the edge arrow so it points toward a world position that is off screen
+local function pointEdgeArrow(world: Vector3): boolean
+	local cam = Workspace.CurrentCamera
+	local vp = cam.ViewportSize
+	local sp = cam:WorldToViewportPoint(world)
+	local margin = 70
+	local onScreen = sp.Z > 0 and sp.X > margin and sp.X < vp.X - margin and sp.Y > margin and sp.Y < vp.Y - margin
+	if onScreen then
+		return false
+	end
+	local centre = vp / 2
+	local dir = Vector2.new(sp.X, sp.Y) - centre
+	if sp.Z <= 0 then
+		dir = -dir -- behind the camera: the projection is mirrored
+	end
+	if dir.Magnitude < 1 then
+		dir = Vector2.new(0, 1)
+	end
+	local t = math.min((vp.X / 2 - margin) / math.max(math.abs(dir.X), 1e-3), (vp.Y / 2 - margin) / math.max(math.abs(dir.Y), 1e-3))
+	local pos = centre + dir * t
+	local inset = GuiService:GetGuiInset() -- viewport space -> this ScreenGui's space
+	edgeArrow.Position = UDim2.fromOffset(pos.X - inset.X, pos.Y - inset.Y)
+	edgeArrow.Rotation = math.deg(math.atan2(dir.Y, dir.X)) - 90
+	edgeArrow.Visible = true
+	return true
+end
+
+RunService.RenderStepped:Connect(function()
+	local step = player:GetAttribute("Tutorial") or 0
+	showStep(step)
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		hideGuides()
+		return
+	end
+	local bob = math.sin(os.clock() * 5) * 8
+	markerArrow.Position = UDim2.new(0.5, 0, 0, 82 + bob)
+
+	-- in the shop during step 4: point at the Buy button of the next tool
+	if step == 4 and Shop.panel.Visible then
+		markerGui.Enabled = false
+		beam.Enabled = false
+		local id = Shop.nextToolId()
+		local c = id and Shop.visibleCard(id)
+		if c then
+			local b = c:FindFirstChild("Action")
+			local p = b.AbsolutePosition + Vector2.new(b.AbsoluteSize.X / 2, -34 + bob * 0.6)
+			edgeArrow.Position = UDim2.fromOffset(p.X, p.Y)
+			edgeArrow.Rotation = 0
+			edgeArrow.Visible = true
+		else
+			edgeArrow.Visible = false
+		end
+		return
+	end
+
+	local pos, name, hideNear
+	if step >= 1 and step <= TOTAL then
+		pos, name, hideNear = targetFor(step, hrp)
+	elseif step == 0 then
+		-- after the tutorial: a gentle reminder when your tool is full
+		local load = player:GetAttribute("Load") or 0
+		local cap = player:GetAttribute("Capacity") or 1
+		if load >= cap and load > 0 then
+			pos, name, hideNear = H.Pile, "SNOW PILE", false
+		end
+	end
+	if not pos or Panels.anyOpen() then
+		hideGuides()
+		return
+	end
+	local flat = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
+	local dist = (flat - Vector3.new(pos.X, 0, pos.Z)).Magnitude
+	marker.CFrame = CFrame.new(pos.X, 0, pos.Z)
+	if hideNear and dist < 9 then
+		hideGuides()
+		return
+	end
+	markerLabel.Text = name .. "\n" .. math.floor(dist) .. " studs"
+	markerGui.Enabled = true
+	beam.Enabled = step > 0 and dist > 12
+	if step > 0 then
+		if not pointEdgeArrow(pos + Vector3.new(0, 5, 0)) then
+			edgeArrow.Visible = false
+		end
+	else
+		edgeArrow.Visible = false
+	end
+end)
+
+return Tutorial
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="Folder" referent="22">
+          <Properties>
+            <string name="Name">UI</string>
+          </Properties>
+          <Item class="ModuleScript" referent="23">
+            <Properties>
+              <string name="Name">DailyPanel</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- Daily rewards: a 7-day streak calendar and a Claim button.
+-- Reward amounts are set in Config.DailyRewards.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Theme = require(script.Parent.Theme)
+local Panels = require(script.Parent.Panels)
+local Hud = require(script.Parent.Hud)
+local C, new, label, button = Theme.C, Theme.new, Theme.label, Theme.button
+local fmt = Config.FormatNumber
+
+local player = Players.LocalPlayer
+
+local Daily = {}
+
+local panel = Panels.make("Daily", "Daily Rewards", Vector2.new(520, 420))
+Daily.panel = panel
+label({ Text = "Come back every day to keep your streak. Day 7 is the big one!", Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 0, 20), Font = Theme.BodyFont, TextColor3 = C.muted, ZIndex = 11, Parent = panel })
+local grid = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 72), Size = UDim2.new(1, 0, 0, 200), ZIndex = 11, Parent = panel }, {
+	new("UIGridLayout", { CellSize = UDim2.new(0.25, -8, 0, 92), CellPadding = UDim2.fromOffset(8, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
+})
+local cells = {}
+for i = 1, #Config.DailyRewards do
+	local cell = new("Frame", { BackgroundColor3 = if i == 7 then Color3.fromHex("#7a4fd0") else C.panel2, LayoutOrder = i, ZIndex = 11, Parent = grid }, { Theme.corner(12), Theme.pad(6) })
+	label({ Text = "Day " .. i, Size = UDim2.new(1, 0, 0, 16), TextColor3 = C.muted, ZIndex = 12, Parent = cell })
+	Theme.coin(16, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 20), ZIndex = 12, Parent = cell })
+	label({ Name = "Reward", Text = "", Position = UDim2.fromOffset(0, 38), Size = UDim2.new(1, 0, 0, 30), TextWrapped = true, ZIndex = 12, Parent = cell })
+	label({ Name = "Check", Text = "CLAIMED", Position = UDim2.fromOffset(0, 66), Size = UDim2.new(1, 0, 0, 14), TextColor3 = C.good, Visible = false, ZIndex = 12, Parent = cell })
+	new("UIStroke", { Color = C.accent, Thickness = 3, Enabled = false, Parent = cell })
+	cells[i] = cell
+end
+local claimBtn = button({ Text = "Claim", Position = UDim2.new(0, 0, 1, -86), Size = UDim2.new(1, 0, 0, 48), ZIndex = 11, Parent = panel })
+local info = label({ Text = "", Position = UDim2.new(0, 0, 1, -30), Size = UDim2.new(1, 0, 0, 20), Font = Theme.BodyFont, TextColor3 = C.muted, ZIndex = 11, Parent = panel })
+
+function Daily.render()
+	local can = player:GetAttribute("DailyCanClaim")
+	local idx = player:GetAttribute("DailyIndex") or 1
+	local progress = player:GetAttribute("ProgressCoins") or 10
+	for i, r in Config.DailyRewards do
+		local cell = cells[i]
+		local coins = math.max(r.min, math.floor(progress * r.pct + 0.5))
+		cell.Reward.Text = fmt(coins) .. " coins" .. (if r.spins > 0 then "\n+" .. r.spins .. " spin" .. (if r.spins > 1 then "s" else "") else "")
+		local done = if can then i < idx else i <= idx
+		cell.Check.Visible = done
+		cell.BackgroundTransparency = if done then 0.5 else 0
+		cell:FindFirstChildOfClass("UIStroke").Enabled = can and i == idx
+	end
+	claimBtn.Text = if can then "Claim Day " .. idx else "Claimed today"
+	claimBtn.BackgroundColor3 = if can then C.accent else C.disabled
+	claimBtn.Active = can == true
+	local streak = player:GetAttribute("DailyStreak") or 0
+	if can and player:GetAttribute("DailyBroken") then
+		info.Text = "Your streak reset. Start again today!"
+	elseif can then
+		info.Text = "Current streak: " .. streak .. " day" .. (if streak == 1 then "" else "s")
+	else
+		info.Text = "Streak: " .. streak .. "  |  next reward in " .. Panels.untilTomorrow()
+	end
+end
+
+claimBtn.Activated:Connect(function()
+	if not player:GetAttribute("DailyCanClaim") then
+		return
+	end
+	local rw = Remotes.ClaimDaily:InvokeServer()
+	if rw then
+		Hud.toast("+" .. fmt(rw.coins) .. " coins" .. (if rw.spins > 0 then " and +" .. rw.spins .. " spin" .. (if rw.spins > 1 then "s" else "") else "") .. "!")
+	end
+	task.wait(0.15)
+	Daily.render()
+end)
+
+function Daily.open()
+	Panels.closeAll()
+	Daily.render()
+	panel.Visible = true
+end
+
+return Daily
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="24">
+            <Properties>
+              <string name="Name">EventBar</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- The event bar at the top of the screen: a countdown to the next event, then the
+-- current event's name, time left and its progress (green) or HP (red) bar.
+-- It reads attributes on ReplicatedStorage.EventState, set by the server's EventService.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Theme = require(script.Parent.Theme)
+local Panels = require(script.Parent.Panels)
+local C, new, label = Theme.C, Theme.new, Theme.label
+
+local state = ReplicatedStorage:WaitForChild("EventState")
+local gui = Panels.gui
+
+local EventBar = {}
+
+local frame = new("Frame", {
+	Name = "EventBar",
+	BackgroundColor3 = C.panel,
+	BackgroundTransparency = 0.05,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 10),
+	Size = UDim2.fromOffset(250, 34),
+	ZIndex = 18,
+	Parent = gui,
+}, { Theme.corner(12), new("UIStroke", { Color = C.accent, Thickness = 2, Transparency = 0.4 }) })
+local title = label({ Text = "", Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 22), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 19, Parent = frame })
+local timer = label({ Text = "", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 6), Size = UDim2.fromOffset(70, 22), Font = Theme.TitleFont, TextColor3 = C.accent, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 19, Parent = frame })
+local bar = new("Frame", { BackgroundColor3 = Color3.fromRGB(10, 22, 44), Position = UDim2.fromOffset(12, 34), Size = UDim2.new(1, -24, 0, 24), ClipsDescendants = true, Visible = false, ZIndex = 19, Parent = frame }, { Theme.corner(10) })
+local fill = new("Frame", { BackgroundColor3 = C.good, Size = UDim2.fromScale(0, 1), ZIndex = 20, Parent = bar }, { Theme.corner(10) })
+local barText = label({ Text = "", Position = UDim2.fromScale(0, 0.1), Size = UDim2.fromScale(1, 0.8), ZIndex = 21, TextStrokeTransparency = 0.4, Parent = bar })
+
+local function clock(secs: number): string
+	secs = math.max(0, math.floor(secs))
+	return string.format("%d:%02d", secs // 60, secs % 60)
+end
+
+RunService.RenderStepped:Connect(function()
+	local now = Workspace:GetServerTimeNow()
+	local tutorial = gui:FindFirstChild("TutorialCard")
+	frame.Position = UDim2.new(0.5, 0, 0, if tutorial and tutorial.Visible then 124 else 10)
+	if state:GetAttribute("Phase") == "active" then
+		frame.Size = UDim2.fromOffset(420, 66)
+		title.Text = state:GetAttribute("Title") or "Event"
+		title.Size = UDim2.new(1, -100, 0, 22)
+		timer.Visible = true
+		timer.Text = clock((state:GetAttribute("EndsAt") or now) - now)
+		bar.Visible = true
+		local hp = state:GetAttribute("BarKind") == "hp"
+		fill.BackgroundColor3 = if hp then C.bad else C.good
+		fill.Size = UDim2.fromScale(state:GetAttribute("Progress") or 0, 1)
+		barText.Text = state:GetAttribute("BarText") or ""
+	else
+		local nextAt = state:GetAttribute("NextAt")
+		frame.Size = UDim2.fromOffset(250, 34)
+		title.Size = UDim2.new(1, -24, 0, 22)
+		title.Text = if nextAt then "Next event in " .. clock(nextAt - now) else "Events starting soon"
+		timer.Visible = false
+		bar.Visible = false
+	end
+end)
+
+return EventBar
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="25">
+            <Properties>
+              <string name="Name">HelpPanel</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- "How to play" window, opened from the Help button. Can restart the tutorial.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Theme = require(script.Parent.Theme)
+local Panels = require(script.Parent.Panels)
+local C, label, button = Theme.C, Theme.label, Theme.button
+
+local Help = {}
+
+local panel = Panels.make("Help", "Clear the Snow", Vector2.new(520, 440))
+Help.panel = panel
+label({
+	Text = "1. Walk into the snow and hold click (or F) to scoop it up. Each tool only carries so much.\n\n"
+		.. "2. Bring it to the Snow Pile at the market. You toss it in when you get close.\n\n"
+		.. "3. Walk up to the Snow Buyer and press E to sell your whole pile for coins.\n\n"
+		.. "4. The Tool Shop is right next door. Walk up to a tool on the display, or press Shop.\n\n"
+		.. "5. Snow grows back, so keep clearing! Claim your daily reward and free spin every day.",
+	Position = UDim2.fromOffset(0, 46),
+	Size = UDim2.new(1, 0, 1, -116),
+	Font = Theme.BodyFont,
+	TextScaled = false,
+	TextSize = 17,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	ZIndex = 11,
+	Parent = panel,
+})
+local replay = button({ Text = "Replay tutorial", Position = UDim2.new(0, 0, 1, -54), Size = UDim2.new(0.5, -6, 0, 50), BackgroundColor3 = C.panel2, TextColor3 = C.text, ZIndex = 11, Parent = panel })
+local go = button({ Text = "Let's go!", Position = UDim2.new(0.5, 6, 1, -54), Size = UDim2.new(0.5, -6, 0, 50), ZIndex = 11, Parent = panel })
+replay.Activated:Connect(function()
+	Remotes.TutorialAction:FireServer("replay")
+	panel.Visible = false
+end)
+go.Activated:Connect(function()
+	panel.Visible = false
+end)
+
+function Help.open()
+	Panels.closeAll()
+	panel.Visible = true
+end
+
+return Help
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="26">
+            <Properties>
+              <string name="Name">Hud</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- Always-on-screen HUD: coins, pile, active boosts, the load bar, side buttons,
+-- toasts and floating "+5" numbers. Panels hook into the side buttons from Client.
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Theme = require(script.Parent.Theme)
+local Panels = require(script.Parent.Panels)
+local C, new, label = Theme.C, Theme.new, Theme.label
+local fmt = Config.FormatNumber
+
+local player = Players.LocalPlayer
+local gui = Panels.gui
+
+local Hud = {}
+
+-- ---------------------------------------------------------------- top left: coins, pile, boosts
 local top = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(260, 200), Parent = gui }, {
 	new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
 })
 local function pill(order: number, height: number)
-	return new("Frame", { BackgroundColor3 = C.panel, BackgroundTransparency = 0.05, Size = UDim2.fromOffset(200, height), LayoutOrder = order, Parent = top }, { corner(height // 2), pad(6) })
+	return new("Frame", { BackgroundColor3 = C.panel, BackgroundTransparency = 0.05, Size = UDim2.fromOffset(200, height), LayoutOrder = order, Parent = top }, { Theme.corner(height // 2) })
 end
 local coinPill = pill(1, 46)
-local coinText = label({ Text = "🪙 0", Size = UDim2.fromScale(1, 1), Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, Parent = coinPill })
+Theme.coin(30, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, 0), Parent = coinPill })
+local coinText = label({ Text = "0", Position = UDim2.fromOffset(46, 7), Size = UDim2.new(1, -58, 1, -14), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, Parent = coinPill })
 local pilePill = pill(2, 34)
-local pileText = label({ Text = "⛰ Pile: 0", Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Left, Parent = pilePill })
+-- a little white snow mound as the pile icon
+new("Frame", { BackgroundColor3 = Color3.fromRGB(235, 243, 255), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -8), Size = UDim2.fromOffset(26, 14), Parent = pilePill }, {
+	new("UICorner", { CornerRadius = UDim.new(0.5, 0) }),
+})
+local pileText = label({ Text = "Pile: 0", Position = UDim2.fromOffset(44, 6), Size = UDim2.new(1, -54, 1, -12), TextXAlignment = Enum.TextXAlignment.Left, Parent = pilePill })
 local boostsFrame = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(200, 70), LayoutOrder = 3, Parent = top }, {
 	new("UIListLayout", { Padding = UDim.new(0, 4) }),
 })
 
+-- ---------------------------------------------------------------- bottom: tool + load bar
 local bottom = new("Frame", {
 	BackgroundTransparency = 1,
 	AnchorPoint = Vector2.new(0.5, 1),
 	Position = UDim2.new(0.5, 0, 1, -16),
 	Size = UDim2.fromOffset(420, 84),
 	Parent = gui,
-})
-new("UISizeConstraint", { MaxSize = Vector2.new(420, 84), Parent = bottom })
-local toolText = label({ Text = "Bare Hands", Size = UDim2.new(1, 0, 0, 24), Font = Enum.Font.FredokaOne, TextStrokeTransparency = 0.5, Parent = bottom })
-local bar = new("Frame", { BackgroundColor3 = C.panel, Position = UDim2.fromOffset(0, 28), Size = UDim2.new(1, 0, 0, 28), ClipsDescendants = true, Parent = bottom }, { corner(14) })
-local barFill = new("Frame", { BackgroundColor3 = Color3.fromRGB(220, 238, 255), Size = UDim2.fromScale(0, 1), Parent = bar }, { corner(14) })
+}, { new("UISizeConstraint", { MaxSize = Vector2.new(420, 84) }) })
+local toolText = label({ Text = "Bare Hands", Size = UDim2.new(1, 0, 0, 24), Font = Theme.TitleFont, TextStrokeTransparency = 0.5, Parent = bottom })
+local bar = new("Frame", { BackgroundColor3 = C.panel, Position = UDim2.fromOffset(0, 28), Size = UDim2.new(1, 0, 0, 28), ClipsDescendants = true, Parent = bottom }, { Theme.corner(14) })
+local barFill = new("Frame", { BackgroundColor3 = Color3.fromRGB(220, 238, 255), Size = UDim2.fromScale(0, 1), Parent = bar }, { Theme.corner(14) })
 local barText = label({ Text = "0 / 1 snow", Size = UDim2.fromScale(1, 0.8), Position = UDim2.fromScale(0, 0.1), TextColor3 = C.ink, ZIndex = 2, Parent = bar })
 local hint = label({
-	Text = if isTouch then "Hold SCOOP in the snow" else "Hold click or F to scoop · R auto-scoop",
+	Text = if Panels.isTouch then "Hold SCOOP in the snow" else "Hold click or F to scoop  |  R = auto-scoop",
 	Size = UDim2.new(1, 0, 0, 18),
 	Position = UDim2.fromOffset(0, 62),
-	Font = Enum.Font.Gotham,
+	Font = Theme.BodyFont,
 	TextColor3 = C.ink,
 	TextStrokeColor3 = Color3.new(1, 1, 1),
 	TextStrokeTransparency = 0.3,
 	Parent = bottom,
 })
 
+-- ---------------------------------------------------------------- right side buttons
 local side = new("Frame", {
 	BackgroundTransparency = 1,
 	AnchorPoint = Vector2.new(1, 0.5),
 	Position = UDim2.new(1, -12, 0.5, 0),
-	Size = UDim2.fromOffset(78, 330),
+	Size = UDim2.fromOffset(96, 340),
 	Parent = gui,
-}, { new("UIListLayout", { Padding = UDim.new(0, 10), VerticalAlignment = Enum.VerticalAlignment.Center }) })
-local function sideButton(icon: string, text: string)
-	local b = new("TextButton", { BackgroundColor3 = C.panel, Size = UDim2.fromOffset(74, 70), Text = "", AutoButtonColor = true, Parent = side }, { corner(16) })
-	label({ Text = icon, Size = UDim2.new(1, 0, 0.55, 0), Position = UDim2.fromScale(0, 0.06), Parent = b })
-	label({ Text = text, Size = UDim2.new(1, 0, 0.28, 0), Position = UDim2.fromScale(0, 0.64), Parent = b })
+}, { new("UIListLayout", { Padding = UDim.new(0, 10), VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }) })
+
+local function sideButton(order: number, text: string, color: Color3)
+	local b = new("TextButton", { BackgroundColor3 = C.panel, Size = UDim2.fromOffset(92, 54), Text = "", AutoButtonColor = true, LayoutOrder = order, Parent = side }, { Theme.corner(14) })
+	new("Frame", { BackgroundColor3 = color, BorderSizePixel = 0, Position = UDim2.new(0, 0, 1, -6), Size = UDim2.new(1, 0, 0, 6), Parent = b }, { Theme.corner(3) })
+	local t = label({ Name = "Label", Text = text, Font = Theme.TitleFont, Position = UDim2.fromOffset(6, 10), Size = UDim2.new(1, -12, 1, -22), Parent = b })
 	local badge = new("TextLabel", {
 		BackgroundColor3 = C.bad,
 		Size = UDim2.fromOffset(24, 24),
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(1, -4, 0, 4),
-		Font = Enum.Font.GothamBold,
+		Font = Theme.BoldFont,
 		TextColor3 = Color3.new(1, 1, 1),
 		TextScaled = true,
 		Text = "!",
 		Visible = false,
+		ZIndex = 3,
 		Parent = b,
-	}, { corner(12) })
-	return b, badge
+	}, { Theme.round() })
+	return b, badge, t
 end
-local shopBtn = sideButton("🛒", "Shop")
-local dailyBtn, dailyBadge = sideButton("🎁", "Daily")
-local spinBtn, spinBadge = sideButton("🎡", "Spin")
-local autoBtn = sideButton("🔁", "Auto: Off")
+Hud.shopBtn = sideButton(1, "Shop", C.accent)
+Hud.dailyBtn, Hud.dailyBadge = sideButton(2, "Daily", C.good)
+Hud.spinBtn, Hud.spinBadge = sideButton(3, "Spin", C.blue)
+local autoBtn, _, autoLabel = sideButton(4, "Auto: Off", Color3.fromHex("#9b6ce0"))
+Hud.autoBtn = autoBtn
+Hud.helpBtn = sideButton(5, "Help", C.muted)
 
--- toast + floaters
+-- ---------------------------------------------------------------- toast + floaters
 local toast = new("TextLabel", {
 	BackgroundColor3 = C.panel,
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.fromScale(0.5, 0.16),
-	Size = UDim2.fromOffset(420, 64),
-	Font = Enum.Font.FredokaOne,
+	Position = UDim2.fromScale(0.5, 0.3),
+	Size = UDim2.fromOffset(440, 64),
+	Font = Theme.TitleFont,
 	TextColor3 = C.text,
 	TextScaled = true,
 	Visible = false,
-	ZIndex = 20,
+	ZIndex = 40,
 	Parent = gui,
-}, { corner(14), pad(10) })
+}, { Theme.corner(14), Theme.pad(10) })
 local toastToken = 0
-local function showToast(text: string, secs: number?)
+function Hud.toast(text: string, secs: number?)
 	toastToken += 1
 	local my = toastToken
 	toast.Text = text
@@ -2918,20 +4943,21 @@ local function showToast(text: string, secs: number?)
 		end
 	end)
 end
-local function floater(text: string, color: Color3?)
+
+function Hud.floater(text: string, color: Color3?)
 	local f = label({
 		Text = text,
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.42),
-		Size = UDim2.fromOffset(300, 44),
-		Font = Enum.Font.FredokaOne,
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(320, 44),
+		Font = Theme.TitleFont,
 		TextColor3 = color or C.accent,
 		TextStrokeTransparency = 0.2,
-		ZIndex = 15,
+		ZIndex = 35,
 		Parent = gui,
 	})
 	TweenService:Create(f, TweenInfo.new(1.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Position = UDim2.fromScale(0.5, 0.32),
+		Position = UDim2.fromScale(0.5, 0.4),
 		TextTransparency = 1,
 		TextStrokeTransparency = 1,
 	}):Play()
@@ -2940,38 +4966,118 @@ local function floater(text: string, color: Color3?)
 	end)
 end
 
--- touch scoop button
-local scoopHeld = { mouse = false, key = false, touch = false }
-local sendScoop
-if isTouch then
+-- ---------------------------------------------------------------- touch SCOOP button
+-- onChange(held) is called when the button is pressed or released
+function Hud.makeScoopButton(onChange: (boolean) -> ())
 	local tb = new("TextButton", {
 		BackgroundColor3 = Color3.fromRGB(191, 227, 255),
 		AnchorPoint = Vector2.new(1, 1),
 		Position = UDim2.new(1, -110, 1, -110),
 		Size = UDim2.fromOffset(96, 96),
-		Font = Enum.Font.FredokaOne,
+		Font = Theme.TitleFont,
 		Text = "SCOOP",
 		TextColor3 = C.ink,
 		TextScaled = true,
 		Parent = gui,
-	}, { new("UICorner", { CornerRadius = UDim.new(1, 0) }), pad(14) })
+	}, { Theme.round(), Theme.pad(14) })
 	tb.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
-			scoopHeld.touch = true
-			sendScoop()
+			onChange(true)
 		end
 	end)
 	tb.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
-			scoopHeld.touch = false
-			sendScoop()
+			onChange(false)
 		end
 	end)
 end
 
--- ------------------------------------------------------------------ panels
-local panels = {}
-local function makePanel(name: string, title: string, size: Vector2)
+-- ---------------------------------------------------------------- refresh from player attributes
+function Hud.refresh()
+	local coins = player:GetAttribute("Coins") or 0
+	local load = player:GetAttribute("Load") or 0
+	local cap = player:GetAttribute("Capacity") or 1
+	coinText.Text = fmt(coins)
+	pileText.Text = "Pile: " .. fmt(player:GetAttribute("Pile") or 0)
+	local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
+	toolText.Text = tool.name
+	local fill = math.clamp(load / cap, 0, 1)
+	barFill.Size = UDim2.fromScale(fill, 1)
+	barFill.BackgroundColor3 = if fill >= 0.999 then Color3.fromHex("#ff8a8a") else Color3.fromRGB(220, 238, 255)
+	barText.Text = fmt(load) .. " / " .. fmt(cap) .. " snow" .. (if fill >= 0.999 then "  (FULL)" else "")
+	Hud.dailyBadge.Visible = player:GetAttribute("DailyCanClaim") == true
+	local spins = player:GetAttribute("Spins") or 0
+	Hud.spinBadge.Visible = spins > 0
+	Hud.spinBadge.Text = tostring(spins)
+	autoLabel.Text = if player:GetAttribute("Auto") then "Auto: On" else "Auto: Off"
+
+	for _, c in boostsFrame:GetChildren() do
+		if c:IsA("TextLabel") then
+			c:Destroy()
+		end
+	end
+	local now = Workspace:GetServerTimeNow()
+	for _, b in { { "BoostSell", "2x Sell", C.accent }, { "BoostCapacity", "2x Capacity", C.good } } do
+		local left = (player:GetAttribute(b[1]) or 0) - now
+		if left > 0 then
+			new("TextLabel", {
+				BackgroundColor3 = b[3],
+				Size = UDim2.fromOffset(170, 26),
+				Font = Theme.BoldFont,
+				TextScaled = true,
+				TextColor3 = C.ink,
+				Text = string.format("%s  %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60)),
+				Parent = boostsFrame,
+			}, { Theme.corner(8), Theme.pad(4) })
+		end
+	end
+	local hands = player:GetAttribute("Equipped") == "hands"
+		or game:GetService("ReplicatedStorage"):FindFirstChild("EventState") and game:GetService("ReplicatedStorage").EventState:GetAttribute("SnowballsForAll") == true
+	if Panels.isTouch then
+		hint.Text = if hands then "Hold SCOOP in the snow  |  THROW a snowball" else "Hold SCOOP in the snow"
+	else
+		hint.Text = "Hold click or F to scoop  |  R = auto-scoop" .. (if hands then "  |  Q = throw snowball" else "")
+	end
+	hint.Visible = not Panels.isTouch or not player:GetAttribute("Auto")
+end
+
+return Hud
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="27">
+            <Properties>
+              <string name="Name">Panels</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- The ScreenGui every UI piece lives in, plus the pop-up panel frame used by the
+-- Shop, Daily Rewards, Spin and Help windows.
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local Theme = require(script.Parent.Theme)
+local C, new, label, button = Theme.C, Theme.new, Theme.label, Theme.button
+
+local player = Players.LocalPlayer
+
+local Panels = {}
+
+Panels.gui = new("ScreenGui", {
+	Name = "ClearTheSnowUI",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Parent = player:WaitForChild("PlayerGui"),
+})
+Panels.isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+local all: { [string]: Frame } = {}
+Panels.locked = false -- true while the spin wheel is turning, so panels can't close
+
+-- A centred window with a title and a close button. Content goes inside the returned frame,
+-- starting about 44px from the top.
+function Panels.make(name: string, title: string, size: Vector2)
 	local p = new("Frame", {
 		Name = name,
 		BackgroundColor3 = C.panel,
@@ -2980,38 +5086,87 @@ local function makePanel(name: string, title: string, size: Vector2)
 		Size = UDim2.fromOffset(size.X, size.Y),
 		Visible = false,
 		ZIndex = 10,
-		Parent = gui,
-	}, { corner(20), pad(16), new("UISizeConstraint", { MaxSize = size }) })
-	new("UIScale", { Parent = p })
-	label({ Text = title, Size = UDim2.new(1, -50, 0, 34), Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 11, Parent = p })
-	local close = button({ Text = "✕", Size = UDim2.fromOffset(36, 36), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), BackgroundColor3 = C.panel2, TextColor3 = C.text, ZIndex = 11, Parent = p })
+		Parent = Panels.gui,
+	}, { Theme.corner(20), Theme.pad(16), new("UISizeConstraint", { MaxSize = size }), new("UIScale") })
+	label({ Name = "Title", Text = title, Size = UDim2.new(1, -50, 0, 34), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 11, Parent = p })
+	local close = button({ Name = "Close", Text = "X", Size = UDim2.fromOffset(36, 36), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), BackgroundColor3 = C.panel2, TextColor3 = C.text, ZIndex = 11, Parent = p })
 	close.Activated:Connect(function()
-		p.Visible = false
+		if not Panels.locked then
+			p.Visible = false
+		end
 	end)
-	panels[name] = p
+	all[name] = p
+	Panels.fit()
 	return p
 end
-local spinning = false
-local function closeAll()
-	if spinning then
+
+function Panels.closeAll()
+	if Panels.locked then
 		return
 	end
-	for _, p in panels do
+	for _, p in all do
 		p.Visible = false
 	end
 end
-local function fitPanels()
+
+function Panels.anyOpen(): boolean
+	for _, p in all do
+		if p.Visible then
+			return true
+		end
+	end
+	return false
+end
+
+-- shrink panels to fit small screens
+function Panels.fit()
 	local vp = Workspace.CurrentCamera.ViewportSize
-	for _, p in panels do
+	for _, p in all do
 		local s = math.min(1, (vp.X - 24) / p.Size.X.Offset, (vp.Y - 60) / p.Size.Y.Offset)
 		p:FindFirstChildOfClass("UIScale").Scale = math.max(0.45, s)
 	end
 end
+Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(Panels.fit)
 
--- ---------- shop
-local shop = makePanel("Shop", "🛒 Tool Shop — Shopping List", Vector2.new(900, 560))
+-- seconds until the next UTC day, as "5h 12m"
+function Panels.untilTomorrow(): string
+	local t = Workspace:GetServerTimeNow()
+	local left = 86400 - (t % 86400)
+	return string.format("%dh %dm", math.floor(left / 3600), math.floor((left % 3600) / 60))
+end
+
+return Panels
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="28">
+            <Properties>
+              <string name="Name">ShopPanel</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- The Tool Shop's shopping list: two tabs (hand tools / machines) of cards with a 3D
+-- preview, stats and a Buy / Equip button.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Theme = require(script.Parent.Theme)
+local Panels = require(script.Parent.Panels)
+local Hud = require(script.Parent.Hud)
+local C, new, label, button = Theme.C, Theme.new, Theme.label, Theme.button
+local fmt = Config.FormatNumber
+
+local player = Players.LocalPlayer
+
+local Shop = {}
+
+local panel = Panels.make("Shop", "Tool Shop - Shopping List", Vector2.new(900, 560))
+Shop.panel = panel
 local tab = "hand"
-local tabs = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 0, 40), ZIndex = 11, Parent = shop }, {
+local tabs = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 0, 40), ZIndex = 11, Parent = panel }, {
 	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }),
 })
 local tabHand = button({ Text = "Hand Tools", Size = UDim2.new(0.5, -4, 1, 0), ZIndex = 11, Parent = tabs })
@@ -3024,17 +5179,29 @@ local list = new("ScrollingFrame", {
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollBarThickness = 8,
 	ZIndex = 11,
-	Parent = shop,
+	Parent = panel,
 }, {
 	new("UIGridLayout", { CellSize = UDim2.fromOffset(165, 300), CellPadding = UDim2.fromOffset(10, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
 })
+Shop.list = list
 
-local function ownedSet(): { [string]: boolean }
+function Shop.ownedSet(): { [string]: boolean }
 	local s = {}
 	for id in string.gmatch(player:GetAttribute("Owned") or "hands", "[^,]+") do
 		s[id] = true
 	end
 	return s
+end
+
+-- the next tool the player can buy, or nil when they own everything
+function Shop.nextToolId(): string?
+	local owned = Shop.ownedSet()
+	for _, t in Config.Tools do
+		if not owned[t.id] then
+			return t.id
+		end
+	end
+	return nil
 end
 
 -- 3D thumbnail of a model in a ViewportFrame
@@ -3047,10 +5214,9 @@ local function thumbnail(id: string, parent: Instance)
 		LightDirection = Vector3.new(-1, -2, -1),
 		ZIndex = 12,
 		Parent = parent,
-	}, { corner(10) })
+	}, { Theme.corner(10) })
 	local m = Models.Build(id)
-	local tool = Config.GetTool(id)
-	if tool.kind == "hand" then
+	if Config.GetTool(id).kind == "hand" then
 		m:PivotTo(CFrame.Angles(-0.3, 0.6, 0.5))
 	else
 		m:PivotTo(CFrame.Angles(0, 0.7, 0))
@@ -3066,51 +5232,51 @@ local function thumbnail(id: string, parent: Instance)
 	return vf
 end
 
-local cards = {}
-local function renderShop(focus: string?)
+local cards: { [string]: Frame } = {}
+local focused: string? = nil
+
+local function statLine(text: string, y: number, parent: Instance)
+	label({
+		Text = text,
+		Position = UDim2.fromOffset(0, y),
+		Size = UDim2.new(1, 0, 0, 16),
+		Font = Theme.BodyFont,
+		TextColor3 = C.accent,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 12,
+		Parent = parent,
+	})
+end
+
+function Shop.render()
 	tabHand.BackgroundColor3 = if tab == "hand" then C.accent else C.panel2
 	tabHand.TextColor3 = if tab == "hand" then C.ink else C.text
 	tabMachine.BackgroundColor3 = if tab == "machine" then C.accent else C.panel2
 	tabMachine.TextColor3 = if tab == "machine" then C.ink else C.text
-	local owned = ownedSet()
+	local owned = Shop.ownedSet()
 	local coins = player:GetAttribute("Coins") or 0
 	local equipped = player:GetAttribute("Equipped")
 	for i, tool in Config.Tools do
 		local card = cards[tool.id]
 		if not card then
-			card = new("Frame", { BackgroundColor3 = C.panel2, LayoutOrder = i, ZIndex = 11, Parent = list }, { corner(14), pad(8) })
+			card = new("Frame", { BackgroundColor3 = C.panel2, LayoutOrder = i, ZIndex = 11, Parent = list }, { Theme.corner(14), Theme.pad(8) })
 			thumbnail(tool.id, card)
 			label({ Name = "Name", Text = i .. ". " .. tool.name, Position = UDim2.fromOffset(0, 146), Size = UDim2.new(1, 0, 0, 34), TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
-			label({ Text = tool.desc, Position = UDim2.fromOffset(0, 182), Size = UDim2.new(1, 0, 0, 30), Font = Enum.Font.Gotham, TextColor3 = C.muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
-			label({
-				Text = string.format("Carries %s · Width %.0f", fmt(tool.capacity), tool.radius * 2),
-				Position = UDim2.fromOffset(0, 214),
-				Size = UDim2.new(1, 0, 0, 16),
-				Font = Enum.Font.Gotham,
-				TextColor3 = C.accent,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = 12,
-				Parent = card,
-			})
-			label({
-				Text = "Scoop " .. tostring(tool.rate) .. "/s · Speed " .. tostring(tool.speed),
-				Position = UDim2.fromOffset(0, 232),
-				Size = UDim2.new(1, 0, 0, 16),
-				Font = Enum.Font.Gotham,
-				TextColor3 = C.accent,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = 12,
-				Parent = card,
-			})
+			label({ Text = tool.desc, Position = UDim2.fromOffset(0, 182), Size = UDim2.new(1, 0, 0, 30), Font = Theme.BodyFont, TextColor3 = C.muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
+			statLine(string.format("Carries %s  |  Width %.0f", fmt(tool.capacity), tool.radius * 2), 214, card)
+			statLine("Scoop " .. tostring(tool.rate) .. "/s  |  Speed " .. tostring(tool.speed), 232, card)
 			local b = button({ Name = "Action", Text = "", Position = UDim2.new(0, 0, 1, -34), Size = UDim2.new(1, 0, 0, 34), ZIndex = 12, Parent = card })
 			new("UIStroke", { Color = C.accent, Thickness = 3, Enabled = false, Parent = card })
 			b.Activated:Connect(function()
 				local ok, msg = Remotes.BuyTool:InvokeServer(tool.id)
 				if msg then
-					showToast((if ok then "🎉 " else "") .. msg)
+					Hud.toast(msg)
 				end
 				task.wait(0.1)
-				renderShop(tool.id)
+				Shop.render()
+				if ok and (player:GetAttribute("Tutorial") or 0) == 5 then
+					Panels.closeAll() -- let the "Enjoy the game!" card show
+				end
 			end)
 			cards[tool.id] = card
 		end
@@ -3118,25 +5284,56 @@ local function renderShop(focus: string?)
 		local b = card.Action
 		local prevOwned = i == 1 or owned[Config.Tools[i - 1].id]
 		if equipped == tool.id then
-			b.Text = "✔ Equipped"
-			b.BackgroundColor3 = Color3.fromRGB(93, 109, 134)
+			b.Text = "Equipped"
+			b.BackgroundColor3 = C.disabled
 			b.Active = false
 		elseif owned[tool.id] then
 			b.Text = "Equip"
-			b.BackgroundColor3 = Color3.fromHex("#4fa3e0")
+			b.BackgroundColor3 = C.blue
 			b.Active = true
 		elseif not prevOwned then
-			b.Text = "🔒 Buy previous first"
-			b.BackgroundColor3 = Color3.fromRGB(93, 109, 134)
+			b.Text = "Locked"
+			b.BackgroundColor3 = C.disabled
 			b.Active = false
 		else
-			b.Text = "Buy 🪙 " .. fmt(tool.price)
-			b.BackgroundColor3 = if coins >= tool.price then C.good else Color3.fromRGB(93, 109, 134)
+			b.Text = "Buy: " .. fmt(tool.price) .. " coins"
+			b.BackgroundColor3 = if coins >= tool.price then C.good else C.disabled
 			b.Active = true
 		end
 		card.BackgroundTransparency = if not owned[tool.id] and not prevOwned then 0.45 else 0
-		card:FindFirstChildOfClass("UIStroke").Enabled = tool.id == focus
+		card:FindFirstChildOfClass("UIStroke").Enabled = tool.id == focused
 	end
+end
+
+tabHand.Activated:Connect(function()
+	tab = "hand"
+	Shop.render()
+end)
+tabMachine.Activated:Connect(function()
+	tab = "machine"
+	Shop.render()
+end)
+
+-- the card for a tool, if it's on the visible tab (used by the tutorial arrow)
+function Shop.visibleCard(id: string): Frame?
+	local c = cards[id]
+	if panel.Visible and c and c.Visible then
+		return c
+	end
+	return nil
+end
+
+function Shop.open(focus: string?)
+	Panels.closeAll()
+	if not focus and (player:GetAttribute("Tutorial") or 0) == 4 then
+		focus = Shop.nextToolId()
+	end
+	focused = focus
+	if focus then
+		tab = Config.GetTool(focus).kind
+	end
+	Shop.render()
+	panel.Visible = true
 	if focus and cards[focus] then
 		task.defer(function()
 			local c = cards[focus]
@@ -3145,145 +5342,111 @@ local function renderShop(focus: string?)
 		end)
 	end
 end
-tabHand.Activated:Connect(function()
-	tab = "hand"
-	renderShop()
-end)
-tabMachine.Activated:Connect(function()
-	tab = "machine"
-	renderShop()
-end)
-local function openShop(focus: string?)
-	closeAll()
-	if focus then
-		tab = Config.GetTool(focus).kind
-	end
-	renderShop(focus)
-	shop.Visible = true
-end
 
--- ---------- daily rewards
-local daily = makePanel("Daily", "🎁 Daily Rewards", Vector2.new(520, 420))
-label({ Text = "Come back every day to keep your streak. Day 7 is the big one!", Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham, TextColor3 = C.muted, ZIndex = 11, Parent = daily })
-local grid = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 72), Size = UDim2.new(1, 0, 0, 200), ZIndex = 11, Parent = daily }, {
-	new("UIGridLayout", { CellSize = UDim2.new(0.25, -8, 0, 92), CellPadding = UDim2.fromOffset(8, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
-})
-local dayCells = {}
-for i = 1, #Config.DailyRewards do
-	local cell = new("Frame", { BackgroundColor3 = if i == 7 then Color3.fromHex("#7a4fd0") else C.panel2, LayoutOrder = i, ZIndex = 11, Parent = grid }, { corner(12), pad(6) })
-	label({ Text = "Day " .. i, Size = UDim2.new(1, 0, 0, 16), TextColor3 = C.muted, ZIndex = 12, Parent = cell })
-	label({ Name = "Reward", Text = "", Position = UDim2.fromOffset(0, 20), Size = UDim2.new(1, 0, 0, 40), TextWrapped = true, ZIndex = 12, Parent = cell })
-	label({ Name = "Check", Text = "✔", Position = UDim2.fromOffset(0, 62), Size = UDim2.new(1, 0, 0, 18), TextColor3 = C.good, Visible = false, ZIndex = 12, Parent = cell })
-	new("UIStroke", { Color = C.accent, Thickness = 3, Enabled = false, Parent = cell })
-	dayCells[i] = cell
-end
-local claimBtn = button({ Text = "Claim", Position = UDim2.new(0, 0, 1, -86), Size = UDim2.new(1, 0, 0, 48), ZIndex = 11, Parent = daily })
-local dailyInfo = label({ Text = "", Position = UDim2.new(0, 0, 1, -30), Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham, TextColor3 = C.muted, ZIndex = 11, Parent = daily })
+return Shop
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="29">
+            <Properties>
+              <string name="Name">SpinPanel</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- Lucky Spin. The wheel on screen is the same 3D wheel model as the one in the plaza,
+-- shown in a ViewportFrame, with the prize names drawn on top. Both wheels turn together.
+-- Prizes and their chances are set in Config.Wheel.
 
-local function untilTomorrow(): string
-	local t = Workspace:GetServerTimeNow()
-	local left = 86400 - (t % 86400)
-	return string.format("%dh %dm", math.floor(left / 3600), math.floor((left % 3600) / 60))
-end
-local function renderDaily()
-	local can = player:GetAttribute("DailyCanClaim")
-	local idx = player:GetAttribute("DailyIndex") or 1
-	local progress = player:GetAttribute("ProgressCoins") or 10
-	for i, r in Config.DailyRewards do
-		local cell = dayCells[i]
-		local coins = math.max(r.min, math.floor(progress * r.pct + 0.5))
-		cell.Reward.Text = "🪙 " .. fmt(coins) .. (if r.spins > 0 then "\n🎡 +" .. r.spins else "")
-		local done = if can then i < idx else i <= idx
-		cell.Check.Visible = done
-		cell.BackgroundTransparency = if done then 0.5 else 0
-		cell:FindFirstChildOfClass("UIStroke").Enabled = can and i == idx
-	end
-	claimBtn.Text = if can then "Claim Day " .. idx else "Claimed today ✔"
-	claimBtn.BackgroundColor3 = if can then C.accent else Color3.fromRGB(93, 109, 134)
-	claimBtn.Active = can == true
-	local streak = player:GetAttribute("DailyStreak") or 0
-	if can and player:GetAttribute("DailyBroken") then
-		dailyInfo.Text = "Your streak reset. Start again today!"
-	elseif can then
-		dailyInfo.Text = "Current streak: " .. streak .. " day" .. (if streak == 1 then "" else "s")
-	else
-		dailyInfo.Text = "Streak: " .. streak .. " · next reward in " .. untilTomorrow()
-	end
-end
-claimBtn.Activated:Connect(function()
-	if not player:GetAttribute("DailyCanClaim") then
-		return
-	end
-	local rw = Remotes.ClaimDaily:InvokeServer()
-	if rw then
-		showToast("🎁 +" .. fmt(rw.coins) .. " coins" .. (if rw.spins > 0 then " and +" .. rw.spins .. " spin" .. (if rw.spins > 1 then "s" else "") else "") .. "!")
-	end
-	task.wait(0.15)
-	renderDaily()
-end)
-local function openDaily()
-	closeAll()
-	renderDaily()
-	daily.Visible = true
-end
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 
--- ---------- spin wheel
-local spinPanel = makePanel("Spin", "🎡 Lucky Spin", Vector2.new(480, 560))
-local wheelHolder = new("Frame", {
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Theme = require(script.Parent.Theme)
+local Panels = require(script.Parent.Panels)
+local Hud = require(script.Parent.Hud)
+local C, new, label, button = Theme.C, Theme.new, Theme.label, Theme.button
+local fmt = Config.FormatNumber
+
+local player = Players.LocalPlayer
+
+local Spin = {}
+
+local panel = Panels.make("Spin", "Lucky Spin", Vector2.new(480, 580))
+Spin.panel = panel
+
+local WHEEL_PX = 360
+local holder = new("Frame", {
 	BackgroundTransparency = 1,
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 56),
-	Size = UDim2.fromOffset(340, 340),
+	Position = UDim2.new(0.5, 0, 0, 62),
+	Size = UDim2.fromOffset(WHEEL_PX, WHEEL_PX),
 	ZIndex = 11,
-	Parent = spinPanel,
+	Parent = panel,
 })
-local wheelDisc = new("Frame", { BackgroundColor3 = Color3.fromHex("#ffd54f"), Size = UDim2.fromScale(1, 1), ZIndex = 11, Parent = wheelHolder }, {
-	new("UICorner", { CornerRadius = UDim.new(1, 0) }),
+-- dark backing disc so the wheel edge reads cleanly
+new("Frame", { BackgroundColor3 = Color3.fromRGB(10, 22, 44), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(1.02, 1.02), ZIndex = 11, Parent = holder }, { Theme.round() })
+
+-- the 3D wheel
+local RADIUS_M = 1
+local view = new("ViewportFrame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.fromScale(1, 1),
+	Ambient = Color3.fromRGB(210, 210, 210),
+	LightColor = Color3.fromRGB(255, 255, 255),
+	LightDirection = Vector3.new(0.3, -0.5, 1),
+	ZIndex = 12,
+	Parent = holder,
 })
+local uiWheel = Models.BuildWheel(RADIUS_M)
+uiWheel:PivotTo(CFrame.new())
+uiWheel.Parent = view
+local rim = RADIUS_M * Config.STUDS_PER_METER + 0.2
+local cam = new("Camera", { FieldOfView = 30, Parent = view })
+cam.CFrame = CFrame.lookAt(Vector3.new(0, 0, -rim / math.tan(math.rad(15))), Vector3.zero)
+view.CurrentCamera = cam
+
+-- prize names, laid out to match the model: segment i is (i - 1) * 45 degrees clockwise from the top
 local nSeg = #Config.Wheel
 local segDeg = 360 / nSeg
+local labels = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 13, Parent = holder })
 for i, s in Config.Wheel do
-	local arm = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Rotation = (i - 1) * segDeg, ZIndex = 12, Parent = wheelDisc })
-	local width = 2 * math.sin(math.rad(segDeg / 2)) * 0.47
-	local petal = new("Frame", {
-		BackgroundColor3 = Color3.fromHex(s.color),
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(width * 1.08, 0.47),
-		ZIndex = 12 + (i % 2),
-		Parent = arm,
-	}, { corner(18) })
+	local a = math.rad((i - 1) * segDeg)
 	label({
 		Text = s.label,
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.33),
-		Size = UDim2.fromScale(1.6, 0.16),
-		Rotation = -90,
-		Font = Enum.Font.FredokaOne,
-		TextStrokeTransparency = 0.5,
+		Position = UDim2.fromScale(0.5 + math.sin(a) * 0.29, 0.5 - math.cos(a) * 0.29),
+		Size = UDim2.fromScale(0.34, 0.085),
+		Rotation = (i - 1) * segDeg - 90,
+		Font = Theme.TitleFont,
+		TextStrokeTransparency = 0.3,
 		ZIndex = 14,
-		Parent = petal,
+		Parent = labels,
 	})
 end
-new("Frame", { BackgroundColor3 = Color3.fromHex("#ffd54f"), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.2, 0.2), ZIndex = 16, Parent = wheelDisc }, {
-	new("UICorner", { CornerRadius = UDim.new(1, 0) }),
-})
-label({ Text = "▼", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 0, 14), Size = UDim2.fromOffset(44, 44), TextColor3 = C.bad, TextStrokeTransparency = 0, ZIndex = 18, Parent = wheelHolder })
-local spinBtnGo = button({ Text = "Spin!", Position = UDim2.new(0, 0, 1, -96), Size = UDim2.new(1, 0, 0, 50), ZIndex = 11, Parent = spinPanel })
-local spinInfo = label({ Text = "", Position = UDim2.new(0, 0, 1, -38), Size = UDim2.new(1, 0, 0, 34), Font = Enum.Font.Gotham, TextColor3 = C.muted, TextWrapped = true, ZIndex = 11, Parent = spinPanel })
+-- pointer at the top
+local pointer = Theme.arrow(46, C.bad, 16)
+pointer.Position = UDim2.new(0.5, 0, 0, 4)
+pointer.Parent = holder
 
-local function renderSpin()
+local spinBtn = button({ Text = "Spin!", Position = UDim2.new(0, 0, 1, -100), Size = UDim2.new(1, 0, 0, 50), ZIndex = 11, Parent = panel })
+local info = label({ Text = "", Position = UDim2.new(0, 0, 1, -40), Size = UDim2.new(1, 0, 0, 34), Font = Theme.BodyFont, TextColor3 = C.muted, TextWrapped = true, ZIndex = 11, Parent = panel })
+
+local spinning = false
+function Spin.render()
 	local n = player:GetAttribute("Spins") or 0
 	local free = player:GetAttribute("FreeSpin")
-	spinBtnGo.Text = if spinning then "Spinning…" elseif free then "Free Spin!" elseif n > 0 then "Spin! (" .. n .. " left)" else "No spins left"
-	spinBtnGo.BackgroundColor3 = if not spinning and n > 0 then C.accent else Color3.fromRGB(93, 109, 134)
+	spinBtn.Text = if spinning then "Spinning..." elseif free then "Free Spin!" elseif n > 0 then "Spin! (" .. n .. " left)" else "No spins left"
+	spinBtn.BackgroundColor3 = if not spinning and n > 0 then C.accent else C.disabled
 	local base = math.max(10, math.floor((player:GetAttribute("ProgressCoins") or 10) * 0.1 + 0.5))
-	spinInfo.Text = if n == 0
-		then "Free spin resets in " .. untilTomorrow() .. ". Daily rewards give bonus spins."
-		else "Coin prizes right now: 🪙 " .. fmt(base) .. " up to " .. fmt(base * 25)
+	info.Text = if n == 0
+		then "Free spin resets in " .. Panels.untilTomorrow() .. ". Daily rewards give bonus spins."
+		else "Coin prizes right now: " .. fmt(base) .. " up to " .. fmt(base * 25) .. " coins"
 end
 
--- the 3D wheel in the plaza spins along with the UI wheel
+-- the 3D wheel in the plaza turns with this one
 local plazaWheel, plazaBase
 task.spawn(function()
 	plazaWheel = CollectionService:GetTagged("SpinWheel")[1]
@@ -3293,204 +5456,244 @@ task.spawn(function()
 	end
 	plazaBase = plazaWheel:GetPivot()
 end)
-local wheelAngle = 0 -- degrees, UI rotation (clockwise)
+
+local angle = 0 -- degrees, clockwise as you look at the wheel
 local function setWheel(deg: number)
-	wheelAngle = deg
-	wheelDisc.Rotation = deg
+	angle = deg
+	local rot = CFrame.Angles(0, 0, math.rad(deg))
+	if panel.Visible then
+		uiWheel:PivotTo(rot)
+		labels.Rotation = deg
+	end
 	if plazaWheel and plazaBase then
-		plazaWheel:PivotTo(plazaBase * CFrame.Angles(0, 0, math.rad(deg)))
+		plazaWheel:PivotTo(plazaBase * rot)
 	end
 end
 
-spinBtnGo.Activated:Connect(function()
+spinBtn.Activated:Connect(function()
 	if spinning or (player:GetAttribute("Spins") or 0) <= 0 then
 		return
 	end
 	spinning = true
-	renderSpin()
+	Panels.locked = true
+	Spin.render()
 	local result = Remotes.Spin:InvokeServer()
 	if not result then
 		spinning = false
-		renderSpin()
+		Panels.locked = false
+		Spin.render()
 		return
 	end
-	local start = wheelAngle
+	local start = angle
 	local want = -(result.index - 1) * segDeg + (math.random() - 0.5) * segDeg * 0.6
-	local delta = (want - start) % 360
-	local finish = start + 360 * 6 + delta
+	local finish = start + 360 * 6 + (want - start) % 360
 	local t0, dur = os.clock(), 4.2
 	while true do
 		local k = math.min(1, (os.clock() - t0) / dur)
-		local e = 1 - (1 - k) ^ 4
-		setWheel(start + (finish - start) * e)
+		setWheel(start + (finish - start) * (1 - (1 - k) ^ 4))
 		if k >= 1 then
 			break
 		end
 		RunService.RenderStepped:Wait()
 	end
-	setWheel(wheelAngle % 360)
+	setWheel(angle % 360)
 	spinning = false
-	showToast("🎡 " .. Config.Wheel[result.index].label .. "\n" .. result.message, 3)
-	renderSpin()
+	Panels.locked = false
+	Hud.toast(Config.Wheel[result.index].label .. "!\n" .. result.message, 3)
+	Spin.render()
 end)
-local function openSpin()
-	closeAll()
-	renderSpin()
-	spinPanel.Visible = true
+
+-- slow idle turn while nobody is spinning
+RunService.RenderStepped:Connect(function(dt)
+	if not spinning and (panel.Visible or plazaBase) then
+		setWheel((angle + dt * 10) % 360)
+	end
+end)
+
+function Spin.open()
+	Panels.closeAll()
+	Spin.render()
+	panel.Visible = true
+	setWheel(angle)
 end
 
--- ---------- help
-local help = makePanel("Help", "❄ Clear the Snow", Vector2.new(520, 420))
-label({
-	Text = "1. Walk into the snow and hold click (or F) to scoop it up. Each tool only carries so much.\n"
-		.. "2. Bring it back to the Snow Pile at the market. You toss it in automatically.\n"
-		.. "3. Talk to the Snow Buyer to sell your whole pile for coins.\n"
-		.. "4. The Tool Shop is right next door. Walk up to the display or click a tool to see it.\n"
-		.. "5. Snow grows back, so keep clearing! Claim your daily reward and free spin every day.",
-	Position = UDim2.fromOffset(0, 46),
-	Size = UDim2.new(1, 0, 1, -110),
-	Font = Enum.Font.Gotham,
-	TextScaled = false,
-	TextSize = 17,
-	TextWrapped = true,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top,
-	ZIndex = 11,
-	Parent = help,
-})
-local go = button({ Text = "Let's go!", Position = UDim2.new(0, 0, 1, -52), Size = UDim2.new(1, 0, 0, 50), ZIndex = 11, Parent = help })
-go.Activated:Connect(function()
-	help.Visible = false
-end)
-
-shopBtn.Activated:Connect(function()
-	openShop()
-end)
-dailyBtn.Activated:Connect(openDaily)
-spinBtn.Activated:Connect(openSpin)
-autoBtn.Activated:Connect(function()
-	Remotes.SetAuto:FireServer(not player:GetAttribute("Auto"))
-end)
-
-Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitPanels)
-fitPanels()
-
--- ------------------------------------------------------------------ HUD refresh
-local function refreshHud()
-	local coins = player:GetAttribute("Coins") or 0
-	local load = player:GetAttribute("Load") or 0
-	local cap = player:GetAttribute("Capacity") or 1
-	coinText.Text = "🪙 " .. fmt(coins)
-	pileText.Text = "⛰ Pile: " .. fmt(player:GetAttribute("Pile") or 0)
-	local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
-	toolText.Text = (if tool.kind == "machine" then "🚜 " else "🧤 ") .. tool.name
-	local fill = math.clamp(load / cap, 0, 1)
-	barFill.Size = UDim2.fromScale(fill, 1)
-	barFill.BackgroundColor3 = if fill >= 0.999 then Color3.fromHex("#ff8a8a") else Color3.fromRGB(220, 238, 255)
-	barText.Text = fmt(load) .. " / " .. fmt(cap) .. " snow"
-	dailyBadge.Visible = player:GetAttribute("DailyCanClaim") == true
-	local spins = player:GetAttribute("Spins") or 0
-	spinBadge.Visible = spins > 0
-	spinBadge.Text = tostring(spins)
-	for _, c in autoBtn:GetChildren() do
-		if c:IsA("TextLabel") and c.Text:sub(1, 4) == "Auto" then
-			c.Text = if player:GetAttribute("Auto") then "Auto: On" else "Auto: Off"
-		end
-	end
-	-- boosts
-	local now = Workspace:GetServerTimeNow()
-	for _, c in boostsFrame:GetChildren() do
-		if c:IsA("TextLabel") then
-			c:Destroy()
-		end
-	end
-	for _, b in { { "BoostSell", "💰 2x Sell", C.accent }, { "BoostCapacity", "❄ 2x Capacity", C.good } } do
-		local left = (player:GetAttribute(b[1]) or 0) - now
-		if left > 0 then
-			new("TextLabel", {
-				BackgroundColor3 = b[3],
-				Size = UDim2.fromOffset(170, 26),
-				Font = Enum.Font.GothamBold,
-				TextScaled = true,
-				TextColor3 = C.ink,
-				Text = string.format("%s %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60)),
-				Parent = boostsFrame,
-			}, { corner(8), pad(4) })
-		end
-	end
-	hint.Visible = not isTouch or not player:GetAttribute("Auto")
-	if shop.Visible then
-		renderShop()
-	end
-	if daily.Visible then
-		renderDaily()
-	end
-	if spinPanel.Visible and not spinning then
-		renderSpin()
-	end
+function Spin.isSpinning(): boolean
+	return spinning
 end
-for _, a in { "Coins", "Load", "Capacity", "Pile", "Equipped", "Owned", "Spins", "DailyCanClaim", "Auto", "BoostSell", "BoostCapacity" } do
-	player:GetAttributeChangedSignal(a):Connect(refreshHud)
-end
-task.spawn(function()
-	while true do
-		task.wait(1)
-		refreshHud()
-	end
-end)
 
--- ------------------------------------------------------------------ input
-function sendScoop()
-	Remotes.SetScooping:FireServer(scoopHeld.mouse or scoopHeld.key or scoopHeld.touch)
-end
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then
-		return
-	end
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		scoopHeld.mouse = true
-		sendScoop()
-	elseif input.KeyCode == Enum.KeyCode.F then
-		scoopHeld.key = true
-		sendScoop()
-	elseif input.KeyCode == Enum.KeyCode.R then
-		Remotes.SetAuto:FireServer(not player:GetAttribute("Auto"))
-	end
-end)
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		scoopHeld.mouse = false
-		sendScoop()
-	elseif input.KeyCode == Enum.KeyCode.F then
-		scoopHeld.key = false
-		sendScoop()
-	end
-end)
+return Spin
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="30">
+            <Properties>
+              <string name="Name">Theme</string>
+              <string name="Source"><![CDATA[--!nonstrict
+-- Colours, fonts and small helpers for building UI in code.
+-- Change the look of the whole game's UI from here.
+--
+-- Note: Roblox fonts don't include emoji or most symbols (they show up as empty boxes),
+-- so every icon in this game is drawn from plain frames instead of text characters.
 
--- ------------------------------------------------------------------ server messages
-Remotes.Notify.OnClientEvent:Connect(function(kind, a, b)
-	if kind == "toast" then
-		showToast(a)
-	elseif kind == "open" then
-		if a == "shop" then
-			openShop(b)
-		elseif a == "daily" then
-			openDaily()
-		elseif a == "spin" then
-			openSpin()
+local Theme = {}
+
+Theme.C = {
+	panel = Color3.fromRGB(18, 36, 66),
+	panel2 = Color3.fromRGB(32, 58, 98),
+	accent = Color3.fromHex("#ffd54f"),
+	good = Color3.fromHex("#3cc48a"),
+	bad = Color3.fromHex("#e0505a"),
+	blue = Color3.fromHex("#4fa3e0"),
+	disabled = Color3.fromRGB(93, 109, 134),
+	text = Color3.fromRGB(243, 247, 255),
+	muted = Color3.fromRGB(169, 187, 214),
+	ink = Color3.fromRGB(15, 30, 55),
+	coin = Color3.fromHex("#ffca28"),
+	coinEdge = Color3.fromHex("#e09a00"),
+}
+local C = Theme.C
+
+Theme.TitleFont = Enum.Font.FredokaOne
+Theme.BodyFont = Enum.Font.Gotham
+Theme.BoldFont = Enum.Font.GothamBold
+
+-- new("Frame", { props }, { children })
+function Theme.new(className: string, props: { [string]: any }?, children: { Instance }?): any
+	local inst = Instance.new(className)
+	for k, v in props or {} do
+		if k ~= "Parent" then
+			(inst :: any)[k] = v
 		end
-	elseif kind == "dumped" then
-		floater("+" .. fmt(a) .. " ❄ on the pile", Color3.new(1, 1, 1))
-	elseif kind == "sold" then
-		floater("+" .. fmt(a) .. " 🪙")
-	elseif kind == "full" then
-		local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
-		showToast(if tool.kind == "machine" then "Machine full! Drive to the Snow Pile." else "Hands full! Take it to the Snow Pile.")
 	end
-end)
+	for _, c in children or {} do
+		c.Parent = inst
+	end
+	if props and props.Parent then
+		inst.Parent = props.Parent
+	end
+	return inst
+end
+local new = Theme.new
 
--- ------------------------------------------------------------------ local world effects
--- your own pile mound
+function Theme.corner(r: number?)
+	return new("UICorner", { CornerRadius = UDim.new(0, r or 12) })
+end
+function Theme.round()
+	return new("UICorner", { CornerRadius = UDim.new(1, 0) })
+end
+function Theme.pad(px: number)
+	return new("UIPadding", {
+		PaddingTop = UDim.new(0, px),
+		PaddingBottom = UDim.new(0, px),
+		PaddingLeft = UDim.new(0, px),
+		PaddingRight = UDim.new(0, px),
+	})
+end
+
+local function merge(base, props)
+	for k, v in props do
+		base[k] = v
+	end
+	return base
+end
+
+function Theme.label(props)
+	return new("TextLabel", merge({
+		BackgroundTransparency = 1,
+		Font = Theme.BoldFont,
+		TextColor3 = C.text,
+		TextScaled = true,
+	}, props))
+end
+
+function Theme.button(props)
+	return new("TextButton", merge({
+		AutoButtonColor = true,
+		BackgroundColor3 = C.accent,
+		Font = Theme.TitleFont,
+		TextColor3 = C.ink,
+		TextScaled = true,
+	}, props), { Theme.corner(12) })
+end
+
+-- A gold coin drawn from two circles. `size` in pixels.
+function Theme.coin(size: number, props: { [string]: any }?)
+	local c = new("Frame", merge({ BackgroundColor3 = C.coinEdge, Size = UDim2.fromOffset(size, size) }, props or {}), { Theme.round() })
+	new("Frame", {
+		BackgroundColor3 = C.coin,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.72, 0.72),
+		ZIndex = c.ZIndex,
+		Parent = c,
+	}, { Theme.round() })
+	return c
+end
+
+-- An arrow drawn from frames. It points DOWN; set the returned frame's Rotation to aim it
+-- (0 = down, 90 = left, 180 = up, -90 = right). `size` in pixels.
+function Theme.arrow(size: number, color: Color3?, z: number?)
+	color = color or C.accent
+	z = z or 1
+	local holder = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(size, size), AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = z })
+	local function shape(col: Color3, grow: number, zi: number)
+		-- shaft
+		new("Frame", {
+			BackgroundColor3 = col,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0.02, -grow),
+			Size = UDim2.new(0.3, grow * 2, 0.55, grow * 2),
+			ZIndex = zi,
+			Parent = holder,
+		}, { Theme.corner(math.floor(size * 0.06)) })
+		-- head: a square turned 45 degrees, its lower half forms the point
+		new("Frame", {
+			BackgroundColor3 = col,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.6),
+			Size = UDim2.new(0.52, grow * 2, 0.52, grow * 2),
+			Rotation = 45,
+			ZIndex = zi,
+			Parent = holder,
+		}, { Theme.corner(math.floor(size * 0.05)) })
+	end
+	shape(Color3.fromRGB(20, 30, 50), math.max(2, math.floor(size * 0.05)), z)
+	shape(color, 0, z + 1)
+	return holder
+end
+
+return Theme
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="ModuleScript" referent="31">
+          <Properties>
+            <string name="Name">WorldEffects</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Local-only effects in the world: your own snow pile mound, falling snow, the
+-- price / owned labels on the tool display, and the display turntables.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
+local Workspace = game:GetService("Workspace")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Theme = require(script.Parent.UI.Theme)
+local Shop = require(script.Parent.UI.ShopPanel)
+local C, new = Theme.C, Theme.new
+local fmt = Config.FormatNumber
+local H = Config.Hub
+
+local player = Players.LocalPlayer
+
+local WorldEffects = {}
+
+-- your own pile mound (each player sees their own pile)
 local mound = new("Part", {
 	Name = "MyPile",
 	Anchored = true,
@@ -3503,18 +5706,6 @@ local mound = new("Part", {
 	CFrame = CFrame.new(H.Pile),
 	Parent = Workspace,
 }, { new("SpecialMesh", { MeshType = Enum.MeshType.Sphere }) })
-local arrow = new("Part", {
-	Name = "PileArrow",
-	Anchored = true,
-	CanCollide = false,
-	CanQuery = false,
-	CanTouch = false,
-	Material = Enum.Material.Neon,
-	Color = Color3.fromHex("#ffd54f"),
-	Size = Vector3.new(2.4, 2.4, 2.4),
-	Parent = Workspace,
-	Shape = Enum.PartType.Ball,
-})
 
 -- falling snow around the camera
 local snowEmitterPart = new("Part", {
@@ -3543,9 +5734,9 @@ new("ParticleEmitter", {
 	Parent = snowEmitterPart,
 })
 
--- display labels (owned / equipped) and turntables
-local function refreshDisplays()
-	local owned = ownedSet()
+-- display labels: price, OWNED or EQUIPPED
+function WorldEffects.refreshDisplays()
+	local owned = Shop.ownedSet()
 	local equipped = player:GetAttribute("Equipped")
 	for _, holder in CollectionService:GetTagged("ToolDisplay") do
 		local id = holder:GetAttribute("ToolId")
@@ -3555,15 +5746,16 @@ local function refreshDisplays()
 		local sub = frame and frame:FindFirstChild("Subtitle")
 		if sub then
 			local tool = Config.GetTool(id)
-			sub.Text = if equipped == id then "✔ EQUIPPED" elseif owned[id] then "OWNED" else "🪙 " .. fmt(tool.price)
+			sub.Text = if equipped == id then "EQUIPPED" elseif owned[id] then "OWNED" else fmt(tool.price) .. " coins"
 			sub.TextColor3 = if owned[id] then Color3.fromHex("#b9f6ca") else C.accent
 		end
 	end
 end
-player:GetAttributeChangedSignal("Owned"):Connect(refreshDisplays)
-player:GetAttributeChangedSignal("Equipped"):Connect(refreshDisplays)
-task.delay(2, refreshDisplays)
+player:GetAttributeChangedSignal("Owned"):Connect(WorldEffects.refreshDisplays)
+player:GetAttributeChangedSignal("Equipped"):Connect(WorldEffects.refreshDisplays)
+task.delay(2, WorldEffects.refreshDisplays)
 
+-- turntables
 local turntables = {}
 local function addTurntable(holder: Instance)
 	local item = holder:WaitForChild("Item", 10)
@@ -3583,17 +5775,13 @@ RunService.RenderStepped:Connect(function(dt)
 	local t = os.clock()
 	local cam = Workspace.CurrentCamera
 	snowEmitterPart.CFrame = CFrame.new(cam.CFrame.Position + Vector3.new(0, 40, 0))
-	-- pile mound
+	-- pile mound grows with your pile
 	local pile = player:GetAttribute("Pile") or 0
 	local h = math.min(9, 0.4 + math.log10(1 + pile) * 2.4)
 	local cur = mound.Size.Y
 	local y = cur + (h * 2 - cur) * math.min(1, dt * 4)
 	mound.Size = Vector3.new(H.PileRadius * 2, y, H.PileRadius * 2)
 	mound.CFrame = CFrame.new(H.Pile + Vector3.new(0, 0.3, 0))
-	-- bouncing marker over the pile while carrying snow
-	local carrying = (player:GetAttribute("Load") or 0) > 0
-	arrow.Transparency = if carrying then 0 else 1
-	arrow.CFrame = CFrame.new(H.Pile + Vector3.new(0, h + 7 + math.sin(t * 4), 0))
 	-- turntables (throttled, only near the camera)
 	tAcc += dt
 	if tAcc > 1 / 30 then
@@ -3604,23 +5792,9 @@ RunService.RenderStepped:Connect(function(dt)
 			end
 		end
 	end
-	-- idle plaza wheel
-	if plazaWheel and plazaBase and not spinning then
-		wheelAngle = (wheelAngle + dt * 10) % 360
-		plazaWheel:PivotTo(plazaBase * CFrame.Angles(0, 0, math.rad(wheelAngle)))
-		wheelDisc.Rotation = wheelAngle
-	end
 end)
 
--- first-time help
-task.spawn(function()
-	while not player:GetAttribute("Ready") do
-		task.wait(0.5)
-	end
-	refreshHud()
-	refreshDisplays()
-	help.Visible = true
-end)
+return WorldEffects
 ]]></string>
           </Properties>
         </Item>
