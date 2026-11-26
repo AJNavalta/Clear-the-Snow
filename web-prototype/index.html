@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Clear the Snow</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="loading"><div class="flake">❄</div><div>Shoveling the driveway…</div></div>
+
+  <!-- HUD -->
+  <div id="hud-top" class="hud">
+    <div class="pill coins"><span class="ico">🪙</span><span id="coins">0</span></div>
+    <div class="pill pile"><span class="ico">⛰️</span><span>Pile: <b id="pile">0</b></span></div>
+    <div id="boosts"></div>
+  </div>
+
+  <div id="hud-side" class="hud">
+    <button class="side-btn" id="btn-shop"><span>🛒</span>Shop</button>
+    <button class="side-btn" id="btn-daily"><span>🎁</span>Daily<i class="badge" id="daily-badge">!</i></button>
+    <button class="side-btn" id="btn-spin"><span>🎡</span>Spin<i class="badge" id="spin-badge">0</i></button>
+    <button class="side-btn" id="btn-help"><span>❔</span>Help</button>
+  </div>
+
+  <div id="hud-bottom" class="hud">
+    <div id="tool-name">Bare Hands</div>
+    <div class="bar"><div id="load-fill"></div><span id="load-text">0 / 1</span></div>
+    <div id="auto-ind">Auto-scoop: <b id="auto-state">OFF</b> (R)</div>
+  </div>
+
+  <div id="prompt" class="hud hidden"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="floaters"></div>
+
+  <!-- touch controls -->
+  <div id="touch" class="hidden">
+    <div id="joy"><div id="joy-knob"></div></div>
+    <button id="t-scoop">Scoop</button>
+    <button id="t-act">Use</button>
+  </div>
+
+  <!-- Shop -->
+  <div id="shop" class="panel hidden">
+    <div class="panel-head"><h2>🛒 Tool Shop — Shopping List</h2><button class="close" data-close="shop">✕</button></div>
+    <div class="tabs"><button class="tab active" data-tab="hand">Hand Tools</button><button class="tab" data-tab="machine">Machines</button></div>
+    <div id="shop-list"></div>
+  </div>
+
+  <!-- Daily rewards -->
+  <div id="daily" class="panel small hidden">
+    <div class="panel-head"><h2>🎁 Daily Rewards</h2><button class="close" data-close="daily">✕</button></div>
+    <p class="sub">Come back every day to keep your streak. Day 7 is the big one!</p>
+    <div id="daily-grid"></div>
+    <button id="daily-claim" class="big-btn">Claim</button>
+    <p class="sub" id="daily-next"></p>
+  </div>
+
+  <!-- Spin wheel -->
+  <div id="spin" class="panel small hidden">
+    <div class="panel-head"><h2>🎡 Lucky Spin</h2><button class="close" data-close="spin">✕</button></div>
+    <div class="wheel-wrap">
+      <div class="pointer">▼</div>
+      <canvas id="wheel" width="420" height="420"></canvas>
+    </div>
+    <button id="spin-go" class="big-btn">Spin!</button>
+    <p class="sub" id="spin-info"></p>
+  </div>
+
+  <!-- Help -->
+  <div id="help" class="panel small hidden">
+    <div class="panel-head"><h2>❄ Clear the Snow</h2><button class="close" data-close="help">✕</button></div>
+    <ol class="howto">
+      <li>Walk into the snow and <b>hold Space</b> (or click <b>Scoop</b>) to pick it up. Your tool can only carry so much.</li>
+      <li>Bring it back to the <b>Snow Pile</b> at the market. You toss it in automatically.</li>
+      <li>Talk to the <b>Snow Buyer</b> (press <b>E</b>) to sell the whole pile for coins.</li>
+      <li>Right next door, the <b>Tool Shop</b> sells bigger shovels and, later, machines. Click any tool on the display to see it.</li>
+      <li>Snow grows back, so keep clearing! Claim your <b>Daily Reward</b> and free <b>Spin</b> each day.</li>
+    </ol>
+    <p class="keys"><b>WASD / Arrows</b> move · <b>Space</b> scoop · <b>R</b> auto-scoop · <b>E</b> interact · <b>Drag</b> rotate camera · <b>Wheel</b> zoom</p>
+    <button class="big-btn" data-close="help">Let's go!</button>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
