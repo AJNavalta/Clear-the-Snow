@@ -8,6 +8,10 @@
 
 local Config = {}
 
+-- Bumped whenever the game's scripts change. The client compares it with the server's so it
+-- can warn when a place is running an out-of-date copy of the scripts.
+Config.Version = 6
+
 Config.STUDS_PER_METER = 3
 Config.SNOW_VALUE = 1 -- coins per unit of snow sold
 

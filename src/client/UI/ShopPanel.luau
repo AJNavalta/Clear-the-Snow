@@ -22,6 +22,10 @@ local Shop = {}
 local panel = Panels.make("Shop", "Tool Shop - Shopping List", Vector2.new(900, 560))
 Shop.panel = panel
 local tab = "hand"
+-- your coins, top right next to the close button
+local wallet = new("Frame", { BackgroundColor3 = C.panel2, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -46, 0, 2), Size = UDim2.fromOffset(150, 32), ZIndex = 11, Parent = panel }, { Theme.corner(16) })
+Theme.coin(22, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 6, 0.5, 0), ZIndex = 12, Parent = wallet })
+local walletText = label({ Text = "0", Position = UDim2.fromOffset(34, 5), Size = UDim2.new(1, -42, 1, -10), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = wallet })
 local tabs = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 0, 40), ZIndex = 11, Parent = panel }, {
 	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }),
 })
@@ -63,14 +67,20 @@ end
 -- 3D thumbnail of a model in a ViewportFrame
 local function thumbnail(id: string, parent: Instance)
 	local vf = new("ViewportFrame", {
-		BackgroundColor3 = Color3.fromRGB(40, 70, 112),
-		Size = UDim2.new(1, 0, 0, 140),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		Size = UDim2.new(1, 0, 0, 149),
 		Ambient = Color3.fromRGB(180, 190, 210),
 		LightColor = Color3.fromRGB(255, 255, 255),
 		LightDirection = Vector3.new(-1, -2, -1),
 		ZIndex = 12,
 		Parent = parent,
-	}, { Theme.corner(10) })
+	}, {
+		Theme.corner(10),
+		new("UIGradient", { -- soft blue backdrop, like the web version's cards
+			Color = ColorSequence.new(Color3.fromHex("#3d5f8f"), Color3.fromHex("#1c3354")),
+			Rotation = 90,
+		}),
+	})
 	local m = Models.Build(id)
 	if Config.GetTool(id).kind == "hand" then
 		m:PivotTo(CFrame.Angles(-0.3, 0.6, 0.5))
@@ -91,17 +101,27 @@ end
 local cards: { [string]: Frame } = {}
 local focused: string? = nil
 
-local function statLine(text: string, y: number, parent: Instance)
-	label({
-		Text = text,
-		Position = UDim2.fromOffset(0, y),
-		Size = UDim2.new(1, 0, 0, 16),
-		Font = Theme.BodyFont,
-		TextColor3 = C.accent,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		ZIndex = 12,
-		Parent = parent,
-	})
+-- one row of two stats, e.g. "Carries 10" on the left and "Width 2.4m" on the right
+local function hex(c: Color3): string
+	return string.format("#%02x%02x%02x", math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
+end
+local function statRow(y: number, parent: Instance, leftName: string, leftValue: string, rightName: string, rightValue: string)
+	local function cell(text, align)
+		label({
+			Text = text,
+			RichText = true,
+			Position = UDim2.fromOffset(0, y),
+			Size = UDim2.new(1, 0, 0, 15),
+			Font = Theme.BodyFont,
+			TextColor3 = C.text,
+			TextXAlignment = align,
+			ZIndex = 12,
+			Parent = parent,
+		})
+	end
+	local a = hex(C.accent)
+	cell(string.format('%s <font color="%s"><b>%s</b></font>', leftName, a, leftValue), Enum.TextXAlignment.Left)
+	cell(string.format('%s <font color="%s"><b>%s</b></font>', rightName, a, rightValue), Enum.TextXAlignment.Right)
 end
 
 function Shop.render()
@@ -111,18 +131,20 @@ function Shop.render()
 	tabMachine.TextColor3 = if tab == "machine" then C.ink else C.text
 	local owned = Shop.ownedSet()
 	local coins = player:GetAttribute("Coins") or 0
+	walletText.Text = fmt(coins)
 	local equipped = player:GetAttribute("Equipped")
 	for i, tool in Config.Tools do
 		local card = cards[tool.id]
 		if not card then
 			card = new("Frame", { BackgroundColor3 = C.panel2, LayoutOrder = i, ZIndex = 11, Parent = list }, { Theme.corner(14), Theme.pad(8) })
 			thumbnail(tool.id, card)
-			label({ Name = "Name", Text = i .. ". " .. tool.name, Position = UDim2.fromOffset(0, 146), Size = UDim2.new(1, 0, 0, 34), TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
-			label({ Text = tool.desc, Position = UDim2.fromOffset(0, 182), Size = UDim2.new(1, 0, 0, 30), Font = Theme.BodyFont, TextColor3 = C.muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
-			statLine(string.format("Carries %s  |  Width %.0f", fmt(tool.capacity), tool.radius * 2), 214, card)
-			statLine("Scoop " .. tostring(tool.rate) .. "/s  |  Speed " .. tostring(tool.speed), 232, card)
+			label({ Name = "ToolName", Text = i .. ". " .. tool.name, Position = UDim2.fromOffset(0, 154), Size = UDim2.new(1, 0, 0, 18), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
+			label({ Text = tool.desc, Position = UDim2.fromOffset(0, 174), Size = UDim2.new(1, 0, 0, 28), Font = Theme.BodyFont, TextColor3 = C.muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 12, Parent = card })
+			statRow(206, card, "Carries", fmt(tool.capacity), "Width", string.format("%.1fm", tool.radius * 2 / Config.STUDS_PER_METER))
+			statRow(224, card, "Scoop", tostring(tool.rate) .. "/s", "Speed", tostring(tool.speed))
 			local b = button({ Name = "Action", Text = "", Position = UDim2.new(0, 0, 1, -34), Size = UDim2.new(1, 0, 0, 34), ZIndex = 12, Parent = card })
 			new("UIStroke", { Color = C.accent, Thickness = 3, Enabled = false, Parent = card })
+			Theme.coin(18, { Name = "Coin", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Visible = false, ZIndex = 13, Parent = b })
 			b.Activated:Connect(function()
 				local ok, msg = Remotes.BuyTool:InvokeServer(tool.id)
 				if msg then
@@ -148,14 +170,16 @@ function Shop.render()
 			b.BackgroundColor3 = C.blue
 			b.Active = true
 		elseif not prevOwned then
-			b.Text = "Locked"
+			b.Text = "Buy " .. Config.Tools[i - 1].name .. " first"
 			b.BackgroundColor3 = C.disabled
 			b.Active = false
 		else
-			b.Text = "Buy: " .. fmt(tool.price) .. " coins"
+			b.Text = "    Buy " .. fmt(tool.price)
 			b.BackgroundColor3 = if coins >= tool.price then C.good else C.disabled
 			b.Active = true
 		end
+		b.Coin.Visible = owned[tool.id] ~= true and prevOwned == true and equipped ~= tool.id
+		b.TextColor3 = if b.BackgroundColor3 == C.blue then Color3.new(1, 1, 1) else C.ink
 		card.BackgroundTransparency = if not owned[tool.id] and not prevOwned then 0.45 else 0
 		card:FindFirstChildOfClass("UIStroke").Enabled = tool.id == focused
 	end

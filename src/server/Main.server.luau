@@ -20,6 +20,32 @@ local EventService = require(script.Parent.EventService)
 
 local H = Config.Hub
 
+-- ------------------------------------------------------------------ guard against old copies
+-- If the place still holds an older copy of this game's server script, stop it and remove
+-- anything it already built, so only this copy runs. Output says where the old one was.
+for _, root in { game:GetService("ServerScriptService"), workspace, game:GetService("ServerStorage") } do
+	for _, d in root:GetDescendants() do
+		if d:IsA("Script") and not d:IsA("LocalScript") and d ~= script and d.Name == "Main" and not d:IsDescendantOf(script.Parent) then
+			warn("[ClearTheSnow] Stopped an old copy of the server script at " .. d:GetFullName() .. ". Delete it in Studio so only Rojo's copy is left.")
+			d.Enabled = false
+			d:Destroy()
+		end
+	end
+end
+for _, name in { "Town", "Snow", "Presents", "SantaSledEvent" } do
+	local old = workspace:FindFirstChild(name)
+	if old then
+		old:Destroy()
+	end
+end
+for _, name in { "Remotes" } do
+	local old = ReplicatedStorage:FindFirstChild(name)
+	if old then
+		old:Destroy()
+	end
+end
+ReplicatedStorage:SetAttribute("ClearTheSnowVersion", Config.Version)
+
 -- ------------------------------------------------------------------ remotes
 local remotes = Instance.new("Folder")
 remotes.Name = "Remotes"

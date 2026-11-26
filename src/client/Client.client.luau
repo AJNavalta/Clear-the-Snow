@@ -62,9 +62,11 @@ local Shop = require(UI.ShopPanel)
 local Daily = require(UI.DailyPanel)
 local Spin = require(UI.SpinPanel)
 local Help = require(UI.HelpPanel)
-require(UI.EventBar)
-require(script.Parent:WaitForChild("Tutorial"))
-require(script.Parent:WaitForChild("Snowballs"))
+-- these wait for things the server makes, so load them in the background: the shop,
+-- buttons and prompts must work even if one of them is still waiting
+task.spawn(require, UI.EventBar)
+task.spawn(require, script.Parent:WaitForChild("Tutorial"))
+task.spawn(require, script.Parent:WaitForChild("Snowballs"))
 local WorldEffects = require(script.Parent:WaitForChild("WorldEffects"))
 
 local player = Players.LocalPlayer
@@ -167,6 +169,35 @@ Remotes.Notify.OnClientEvent:Connect(function(kind, a, b)
 		local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
 		Hud.toast(if tool.kind == "machine" then "Machine full! Drive to the Snow Pile." else "Hands full! Take it to the Snow Pile.")
 	end
+end)
+
+-- ---------------------------------------------------------------- out-of-date place check
+-- If the server scripts in this place are older than this client, say so on screen.
+task.delay(8, function()
+	local serverVersion = ReplicatedStorage:GetAttribute("ClearTheSnowVersion")
+	if serverVersion == Config.Version then
+		return
+	end
+	warn("[ClearTheSnow] Server scripts are version " .. tostring(serverVersion) .. " but the client is " .. tostring(Config.Version)
+		.. ". This place has old copies of the game's scripts. Open the latest ClearTheSnow.rbxlx, or delete the old scripts and sync with Rojo.")
+	local Theme = require(UI.Theme)
+	local warnCard = Theme.new("TextButton", {
+		Name = "OldScriptsWarning",
+		AutoButtonColor = false,
+		BackgroundColor3 = Theme.C.bad,
+		Size = UDim2.fromOffset(480, 58),
+		LayoutOrder = 0,
+		Font = Theme.BoldFont,
+		TextColor3 = Color3.new(1, 1, 1),
+		TextScaled = true,
+		TextWrapped = true,
+		Text = "This place is running OLD game scripts, so some things won't work. Open the latest ClearTheSnow.rbxlx (or see Output). Click to hide.",
+		ZIndex = 30,
+		Parent = Panels.top,
+	}, { Theme.corner(12), Theme.pad(8) })
+	warnCard.Activated:Connect(function()
+		warnCard:Destroy()
+	end)
 end)
 
 -- ---------------------------------------------------------------- first load
