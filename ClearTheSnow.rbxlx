@@ -1,0 +1,3630 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="2">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[--!strict
+-- Game balance: tools, machines, daily rewards and the spin wheel.
+-- capacity = snow carried per trip, rate = snow scooped per second,
+-- radius = clearing radius (studs), speed = WalkSpeed while using it.
+
+local Config = {}
+
+Config.STUDS_PER_METER = 3
+Config.SNOW_VALUE = 1 -- coins per unit of snow sold
+
+-- Snow field
+Config.WORLD_SIZE = 360 -- studs, centred on the origin
+Config.TILE = 6 -- studs per snow tile
+Config.TILE_MAX_UNITS = 20 -- snow units in a full tile
+Config.UNIT_HEIGHT = 0.11 -- studs of depth per unit
+Config.REGROW_SECONDS = 40 -- time for an empty tile to refill
+Config.REGROW_DELAY = { 6, 12 } -- pause after being scooped before regrowing
+
+export type Tool = {
+	id: string,
+	kind: "hand" | "machine",
+	name: string,
+	price: number,
+	capacity: number,
+	rate: number,
+	radius: number,
+	speed: number,
+	desc: string,
+}
+
+local S = Config.STUDS_PER_METER
+local function t(id, kind, name, price, capacity, rate, radiusM, speedM, desc): Tool
+	return {
+		id = id,
+		kind = kind,
+		name = name,
+		price = price,
+		capacity = capacity,
+		rate = rate,
+		radius = radiusM * S,
+		speed = math.floor(speedM * S * 0.95 + 0.5),
+		desc = desc,
+	}
+end
+
+Config.Tools = {
+	-- 10 hand tools
+	t("hands", "hand", "Bare Hands", 0, 1, 1.5, 0.55, 6.0, "Pack a snowball. Cold fingers, tiny loads."),
+	t("trowel", "hand", "Garden Trowel", 10, 3, 3, 0.6, 6.0, "Borrowed from the flower bed."),
+	t("kidshovel", "hand", "Kid's Plastic Shovel", 30, 6, 5, 0.7, 6.2, "Bright red and surprisingly sturdy."),
+	t("shovel", "hand", "Snow Shovel", 65, 10, 7, 0.8, 6.2, "The classic. Lift with your legs."),
+	t("bigshovel", "hand", "Big Shovel", 120, 16, 10, 0.95, 6.4, "A wider blade for wider driveways."),
+	t("megashovel", "hand", "Mega Shovel", 200, 25, 14, 1.1, 6.4, "Even bigger. Your back is worried."),
+	t("steelshovel", "hand", "Steel Grain Scoop", 340, 40, 19, 1.25, 6.6, "Deep steel scoop that hauls a heap."),
+	t("pusher", "hand", "Push Shovel", 560, 60, 26, 1.45, 6.8, "Just walk and push the snow along."),
+	t("twinpusher", "hand", "Wheeled Sleigh Pusher", 900, 85, 34, 1.65, 7.0, "A huge curved blade on two wheels."),
+	t("sledscoop", "hand", "Sled Scoop", 1350, 120, 44, 1.85, 7.2, "Scoop, sled and slide your haul home."),
+	-- 10 machines
+	t("blower", "machine", "Walk-Behind Snow Blower", 2000, 175, 60, 2.0, 7.5, "Two-stage auger, chute and headlight."),
+	t("tractor", "machine", "Garden Tractor Plow", 3000, 250, 80, 2.2, 9.0, "Lawn tractor with a front blade and a cart."),
+	t("atv", "machine", "ATV Plow", 4400, 350, 105, 2.4, 11.0, "Four-wheeler with a winch-raised blade."),
+	t("snowmobile", "machine", "Snowmobile Groomer", 6300, 500, 135, 2.6, 13.0, "Track, skis and a drag sled out back."),
+	t("pickup", "machine", "Pickup Plow Truck", 9000, 700, 170, 2.9, 13.5, "V-plow, light bar and a salt spreader."),
+	t("skidsteer", "machine", "Skid Steer Loader", 13000, 1000, 215, 3.1, 11.0, "Compact loader with a big snow bucket."),
+	t("resurfacer", "machine", "Ice Resurfacer", 18500, 1400, 270, 3.3, 10.5, "Rink-style machine with a snow tank."),
+	t("snowcat", "machine", "Snowcat", 26000, 2000, 340, 3.6, 12.0, "Twin tracks, tiller and a 12-way blade."),
+	t("loader", "machine", "Wheel Loader", 37500, 2800, 430, 3.9, 12.5, "Articulated giant with a monster bucket."),
+	t("rotary", "machine", "Rotary Snow Blower Truck", 52500, 4000, 550, 4.3, 14.0, "The king of clearing: dual-drum blower truck."),
+}
+
+Config.ToolIndex = {} :: { [string]: number }
+for i, tool in Config.Tools do
+	Config.ToolIndex[tool.id] = i
+end
+
+function Config.GetTool(id: string): Tool
+	local i = Config.ToolIndex[id]
+	return if i then Config.Tools[i] else Config.Tools[1]
+end
+
+-- 7 day streak (repeats). Coins = pct of your next upgrade's price, at least `min`.
+Config.DailyRewards = {
+	{ pct = 0.25, min = 10, spins = 0 },
+	{ pct = 0.35, min = 15, spins = 1 },
+	{ pct = 0.5, min = 25, spins = 0 },
+	{ pct = 0.6, min = 35, spins = 1 },
+	{ pct = 0.75, min = 50, spins = 1 },
+	{ pct = 1.0, min = 75, spins = 2 },
+	{ pct = 1.5, min = 120, spins = 3 },
+}
+
+-- Spin wheel. weight = relative chance. Coin prizes = mult x 10% of next upgrade price.
+Config.Wheel = {
+	{ label = "Coins", kind = "coins", mult = 1, color = "#4fa3e0", weight = 22 },
+	{ label = "2x Sell", kind = "boost", boost = "sell", mins = 3, color = "#f5b83d", weight = 12 },
+	{ label = "Big Coins", kind = "coins", mult = 3, color = "#2f7fc1", weight = 14 },
+	{ label = "+1 Spin", kind = "spin", color = "#9b6ce0", weight = 10 },
+	{ label = "Coins", kind = "coins", mult = 1, color = "#4fa3e0", weight = 22 },
+	{ label = "2x Capacity", kind = "boost", boost = "capacity", mins = 3, color = "#3cc48a", weight = 10 },
+	{ label = "Huge Coins", kind = "coins", mult = 8, color = "#1d5d96", weight = 6 },
+	{ label = "JACKPOT", kind = "coins", mult = 25, color = "#e0505a", weight = 2 },
+}
+
+-- Market layout (studs). The hub sits in the plaza at the centre of town.
+Config.Hub = {
+	Spawn = Vector3.new(0, 0, 6),
+	Sell = Vector3.new(-19.2, 0, -25.8),
+	Shop = Vector3.new(-7.5, 0, -25.8),
+	Pile = Vector3.new(-34, 0, -15),
+	PileRadius = 6,
+	Wheel = Vector3.new(33.6, 0, -24.6),
+	Gift = Vector3.new(33.6, 0, -9.6),
+	-- tool display: 5 columns x 4 tiers, packed tight right beside the shop stall
+	DisplayOrigin = Vector3.new(-0.6, 0, -28.2), -- back-left corner
+	DisplayCols = 5,
+	DisplayStepX = 4.35,
+	DisplayStepZ = 4.5,
+}
+
+function Config.FormatNumber(n: number): string
+	n = math.floor(n)
+	if n >= 1e6 then
+		return (string.format("%.2fM", n / 1e6):gsub("%.?0+M$", "M"))
+	elseif n >= 1e4 then
+		return (string.format("%.1fK", n / 1e3):gsub("%.0K$", "K"))
+	end
+	local s = tostring(n)
+	local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+	return (out:gsub("^,", ""))
+end
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Models</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Procedural part-built models: hand tools, machines, stalls, NPCs, spin wheel.
+--
+-- Models are authored in metres with the front facing +Z (like the web prototype),
+-- then `finish` scales them to studs and turns them to face -Z (Roblox forward).
+-- Every model gets an invisible, anchored "Root" PrimaryPart at its origin:
+--   hand tools: origin = the grip (held in the right hand), blade points down
+--   machines:   origin = ground under the machine's centre
+-- Machine attributes: SeatOffset (Vector3, studs, relative to Root), Standing (bool).
+-- A part named "Load" (ellipsoid) shows how full the tool is.
+
+local Config = require(script.Parent.Config)
+
+local S = Config.STUDS_PER_METER
+local Models = {}
+
+-- ------------------------------------------------------------------ styles
+type Style = { color: Color3, material: Enum.Material, transparency: number?, reflectance: number? }
+
+local styleCache: { [string]: Style } = {}
+local function st(hex: string, material: Enum.Material?, transparency: number?, reflectance: number?): Style
+	local key = hex .. tostring(material) .. tostring(transparency) .. tostring(reflectance)
+	local s = styleCache[key]
+	if not s then
+		s = {
+			color = Color3.fromHex(hex),
+			material = material or Enum.Material.SmoothPlastic,
+			transparency = transparency,
+			reflectance = reflectance,
+		}
+		styleCache[key] = s
+	end
+	return s
+end
+Models.style = st
+
+local M = {
+	tire = st("#1b1c1f", Enum.Material.Rubber),
+	rim = st("#c9ccd1", Enum.Material.Metal),
+	steel = st("#8d939b", Enum.Material.Metal),
+	dark = st("#2a2d33"),
+	black = st("#111214"),
+	chrome = st("#e6e9ee", Enum.Material.Metal, nil, 0.25),
+	glass = st("#7fb6d9", Enum.Material.Glass, 0.45),
+	light = st("#fff6d8", Enum.Material.Neon),
+	tail = st("#ff3b30", Enum.Material.Neon),
+	amber = st("#ffb020", Enum.Material.Neon),
+	seat = st("#232428", Enum.Material.Fabric),
+	wood = st("#9a6a3c", Enum.Material.Wood),
+	rubber = st("#26272b", Enum.Material.Rubber),
+	snow = st("#f4f8ff", Enum.Material.Snow),
+}
+Models.M = M
+
+local function S_(s: Style | string): Style
+	if typeof(s) == "string" then
+		return st(s)
+	end
+	return s
+end
+
+-- ------------------------------------------------------------------ frames & primitives
+-- A frame is { model = Model, cf = CFrame (metres) }. Parts are placed in frame space.
+type Frame = { model: Model, cf: CFrame }
+
+local function sub(g: Frame, x: number, y: number, z: number, rx: number?, ry: number?, rz: number?): Frame
+	return { model = g.model, cf = g.cf * CFrame.new(x, y, z) * CFrame.Angles(rx or 0, ry or 0, rz or 0) }
+end
+
+local function newPart(className: string, g: Frame, size: Vector3, localCf: CFrame, style: Style | string): BasePart
+	local s = S_(style)
+	local p = Instance.new(className) :: BasePart
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanTouch = false
+	p.CanQuery = false
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = s.material
+	p.Color = s.color
+	if s.transparency then
+		p.Transparency = s.transparency
+	end
+	if s.reflectance then
+		p.Reflectance = s.reflectance
+	end
+	p.Size = Vector3.new(math.max(size.X * S, 0.05), math.max(size.Y * S, 0.05), math.max(size.Z * S, 0.05))
+	local cf = g.cf * localCf
+	p.CFrame = CFrame.new(cf.Position * S) * cf.Rotation
+	p.Parent = g.model
+	return p
+end
+
+local function box(g: Frame, w: number, h: number, d: number, style, x: number, y: number, z: number, rx: number?, ry: number?, rz: number?): BasePart
+	return newPart("Part", g, Vector3.new(w, h, d), CFrame.new(x, y, z) * CFrame.Angles(rx or 0, ry or 0, rz or 0), style)
+end
+-- cylinder whose axis runs along local X
+local function cylX(g: Frame, r: number, len: number, style, x: number, y: number, z: number): BasePart
+	local p = newPart("Part", g, Vector3.new(len, r * 2, r * 2), CFrame.new(x, y, z), style) :: Part
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+local function cylY(g: Frame, r: number, h: number, style, x: number, y: number, z: number): BasePart
+	local p = newPart("Part", g, Vector3.new(h, r * 2, r * 2), CFrame.new(x, y, z) * CFrame.Angles(0, 0, math.pi / 2), style) :: Part
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+local function cylZ(g: Frame, r: number, len: number, style, x: number, y: number, z: number): BasePart
+	local p = newPart("Part", g, Vector3.new(len, r * 2, r * 2), CFrame.new(x, y, z) * CFrame.Angles(0, math.pi / 2, 0), style) :: Part
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+local function ball(g: Frame, r: number, style, x: number, y: number, z: number): BasePart
+	local p = newPart("Part", g, Vector3.new(r * 2, r * 2, r * 2), CFrame.new(x, y, z), style) :: Part
+	p.Shape = Enum.PartType.Ball
+	return p
+end
+-- ellipsoid (block + sphere mesh)
+local function blob(g: Frame, w: number, h: number, d: number, style, x: number, y: number, z: number): BasePart
+	local p = newPart("Part", g, Vector3.new(w, h, d), CFrame.new(x, y, z), style)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = p
+	return p
+end
+-- tube between two points (frame space)
+local function rod(g: Frame, a: Vector3, b: Vector3, r: number, style): BasePart?
+	local len = (b - a).Magnitude
+	if len < 1e-4 then
+		return nil
+	end
+	local mid = (a + b) / 2
+	local cf = CFrame.lookAt(mid, b) * CFrame.Angles(0, math.pi / 2, 0)
+	local p = newPart("Part", g, Vector3.new(len, r * 2, r * 2), cf, style) :: Part
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+local function v(x: number, y: number, z: number): Vector3
+	return Vector3.new(x, y, z)
+end
+
+-- Solid triangle (a, b, c in frame space) with the given thickness, from two wedges.
+local function tri(g: Frame, a: Vector3, b: Vector3, c: Vector3, thickness: number, style)
+	local ab, ac, bc = b - a, c - a, c - b
+	local abd, acd, bcd = ab:Dot(ab), ac:Dot(ac), bc:Dot(bc)
+	if abd > acd and abd > bcd then
+		c, a = a, c
+	elseif acd > bcd and acd > abd then
+		a, b = b, a
+	end
+	ab, ac, bc = b - a, c - a, c - b
+	local cross = ac:Cross(ab)
+	if cross.Magnitude < 1e-6 then
+		return
+	end
+	local right = cross.Unit
+	local up = bc:Cross(right).Unit
+	local back = bc.Unit
+	local height = math.abs(ab:Dot(up))
+	local w1 = newPart("WedgePart", g, Vector3.new(thickness, height, math.abs(ab:Dot(back))), CFrame.fromMatrix((a + b) / 2, right, up, back), style)
+	local w2 = newPart("WedgePart", g, Vector3.new(thickness, height, math.abs(ac:Dot(back))), CFrame.fromMatrix((a + c) / 2, -right, up, -back), style)
+	return w1, w2
+end
+
+-- Extrude a side profile (points are {z, y}) across `width` along X, centred on x.
+local function profile(g: Frame, points: { { number } }, width: number, style, x: number?)
+	local px = x or 0
+	local cz, cy = 0, 0
+	for _, p in points do
+		cz += p[1]
+		cy += p[2]
+	end
+	cz /= #points
+	cy /= #points
+	local c = v(px, cy, cz)
+	for i = 1, #points do
+		local p1, p2 = points[i], points[i % #points + 1]
+		tri(g, c, v(px, p1[2], p1[1]), v(px, p2[2], p2[1]), width, style)
+	end
+end
+
+-- Curved surface made of slats around an axis parallel to X through (y=cy, z=cz).
+-- Angle 0 points to +Y, positive angles sweep toward +Z.
+local function arc(g: Frame, cy: number, cz: number, r: number, a0: number, a1: number, n: number, width: number, thick: number, style, x: number?)
+	local da = (a1 - a0) / n
+	local len = 2 * r * math.sin(math.abs(da) / 2) * 1.12
+	for k = 0, n - 1 do
+		local a = a0 + da * (k + 0.5)
+		box(g, width, thick, len, style, x or 0, cy + r * math.cos(a), cz + r * math.sin(a), a, 0, 0)
+	end
+end
+
+-- ------------------------------------------------------------------ assemblies
+local function wheel(g: Frame, r: number, w: number, x: number, y: number, z: number, opts: { lugs: number?, rim: string?, nuts: number? }?)
+	local o = opts or {}
+	local f = sub(g, x, y, z)
+	cylX(f, r, w, M.tire, 0, 0, 0)
+	local lugs = o.lugs or 18
+	for i = 0, lugs - 1 do
+		local a = i / lugs * math.pi * 2
+		box(f, w * 0.42, r * 0.12, r * 0.18, M.tire, (if i % 2 == 1 then 1 else -1) * w * 0.24, r * math.cos(a), r * math.sin(a), a, 0, 0)
+	end
+	local rimStyle = if o.rim then st(o.rim, Enum.Material.Metal) else M.rim
+	for _, side in { 1, -1 } do
+		cylX(f, r * 0.62, 0.02, rimStyle, side * (w / 2 + 0.005), 0, 0)
+		cylX(f, r * 0.5, 0.04, st("#9ea3ab", Enum.Material.Metal), side * (w / 2 + 0.02), 0, 0)
+		cylX(f, r * 0.18, 0.06, M.chrome, side * (w / 2 + 0.05), 0, 0)
+		local nuts = o.nuts or 6
+		for i = 0, nuts - 1 do
+			local a = i / nuts * math.pi * 2
+			cylX(f, r * 0.04, 0.05, M.chrome, side * (w / 2 + 0.04), math.cos(a) * r * 0.32, math.sin(a) * r * 0.32)
+		end
+	end
+end
+
+-- Crawler track along Z centred on (x, y, z). len = distance between end wheel centres.
+local function track(g: Frame, len: number, r: number, w: number, x: number, y: number, z: number, opts: { color: string?, pitch: number?, roadWheels: number?, wheel: string? }?)
+	local o = opts or {}
+	local f = sub(g, x, y, z)
+	local padStyle = st(o.color or "#1e1f22", Enum.Material.Metal)
+	local perim = 2 * len + 2 * math.pi * r
+	local pads = math.floor(perim / (o.pitch or 0.17) + 0.5)
+	local step = perim / pads
+	for i = 0, pads - 1 do
+		local s = i * step
+		local pz, py, a
+		if s < len then
+			pz, py, a = len / 2 - s, -r, 0
+		elseif s < len + math.pi * r then
+			local t = (s - len) / r
+			pz, py, a = -len / 2 - math.sin(t) * r, -math.cos(t) * r, t
+		elseif s < 2 * len + math.pi * r then
+			pz, py, a = -len / 2 + (s - len - math.pi * r), r, math.pi
+		else
+			local t = math.pi + (s - 2 * len - math.pi * r) / r
+			pz, py, a = len / 2 - math.sin(t) * r, -math.cos(t) * r, t
+		end
+		box(f, w, 0.06, step * 0.8, padStyle, 0, py, pz, -a, 0, 0)
+	end
+	local ws = st(o.wheel or "#3a3d44", Enum.Material.Metal)
+	for _, ez in { len / 2, -len / 2 } do
+		cylX(f, r * 0.85, w * 0.8, ws, 0, 0, ez)
+		for i = 0, 9 do
+			local a = i / 10 * math.pi * 2
+			box(f, w * 0.82, r * 0.18, r * 0.18, ws, 0, math.cos(a) * r * 0.85, ez + math.sin(a) * r * 0.85, a, 0, 0)
+		end
+		cylX(f, r * 0.3, w * 0.9, st("#d0a020", Enum.Material.Metal), 0, 0, ez)
+	end
+	local nRoad = o.roadWheels or math.max(3, math.floor(len / (r * 1.2)))
+	for i = 0, nRoad - 1 do
+		local rz = -len / 2 + r + (len - 2 * r) * (i + 0.5) / nRoad
+		cylX(f, r * 0.55, w * 0.7, ws, 0, -r + r * 0.6, rz)
+	end
+	box(f, w * 0.3, r * 0.7, len, st("#2b2e33"), 0, 0, 0)
+end
+
+-- helical auger along X
+local function auger(g: Frame, len: number, r: number, style, x: number, y: number, z: number)
+	local f = sub(g, x, y, z)
+	cylX(f, r * 0.18, len, M.steel, 0, 0, 0)
+	local steps = 18
+	for _, dir in { 1, -1 } do
+		for i = 0, steps - 1 do
+			local t = i / steps
+			local a = t * 3 * math.pi * 2 * dir
+			box(f, 0.05, r * 0.85, r * 0.25, style, dir * t * len / 2, math.cos(a) * r * 0.5, math.sin(a) * r * 0.5, a, 0, 0)
+		end
+	end
+end
+
+local function headlight(g: Frame, r: number, x: number, y: number, z: number)
+	cylZ(g, r * 1.25, r * 0.8, M.black, x, y, z)
+	cylZ(g, r, 0.03, M.light, x, y, z + r * 0.42)
+end
+local function beacon(g: Frame, x: number, y: number, z: number, s: number?)
+	local k = s or 1
+	cylY(g, 0.1 * k, 0.05 * k, M.black, x, y, z)
+	cylY(g, 0.075 * k, 0.15 * k, M.amber, x, y + 0.09 * k, z)
+end
+local function seat(g: Frame, x: number, y: number, z: number, k: number?, color: string?)
+	local s = k or 1
+	local sty = if color then st(color, Enum.Material.Fabric) else M.seat
+	box(g, 0.5 * s, 0.1 * s, 0.48 * s, sty, x, y, z)
+	box(g, 0.5 * s, 0.5 * s, 0.1 * s, sty, x, y + 0.28 * s, z - 0.22 * s, -0.15, 0, 0)
+end
+local function steering(g: Frame, x: number, y: number, z: number, tilt: number?, r: number?)
+	local rr = r or 0.18
+	local f = sub(g, x, y, z, -(tilt or 0.9), 0, 0)
+	for i = 0, 11 do
+		local a = i / 12 * math.pi * 2
+		box(f, 0.04, 0.04, rr * 0.55, M.black, math.cos(a) * rr, 0, math.sin(a) * rr, 0, -a, 0)
+	end
+	for i = 0, 2 do
+		local a = i / 3 * math.pi * 2 + math.pi / 2
+		rod(f, v(0, 0, 0), v(math.cos(a) * rr, 0, math.sin(a) * rr), 0.012, M.black)
+	end
+	cylY(f, 0.04, 0.04, M.dark, 0, 0, 0)
+	rod(f, v(0, 0, 0), v(0, -0.4, 0), 0.025, M.dark)
+end
+local function mirror(g: Frame, x: number, y: number, z: number, side: number)
+	rod(g, v(x, y, z), v(x + side * 0.18, y + 0.06, z), 0.015, M.black)
+	box(g, 0.04, 0.2, 0.14, M.black, x + side * 0.22, y + 0.06, z)
+	box(g, 0.01, 0.17, 0.11, M.chrome, x + side * 0.2, y + 0.06, z)
+end
+-- Plow blade: concave moldboard of slats, cutting edge, back ribs, marker stakes.
+local function plow(g: Frame, w: number, h: number, color: string, x: number, y: number, z: number, ribs: number?, ry: number?, noStakes: boolean?): Frame
+	local f = sub(g, x, y, z, 0, ry or 0, 0)
+	local paint = st(color, Enum.Material.Metal)
+	local function prof(t: number): (number, number)
+		return -0.32 * h * math.sin(t * math.pi) + 0.12 * h * t * t * t, t * h
+	end
+	local n = 8
+	for k = 0, n - 1 do
+		local z0, y0 = prof(k / n)
+		local z1, y1 = prof((k + 1) / n)
+		local len = math.sqrt((z1 - z0) ^ 2 + (y1 - y0) ^ 2)
+		box(f, w, len * 1.08, 0.05, paint, 0, (y0 + y1) / 2, (z0 + z1) / 2, -math.atan2(z1 - z0, y1 - y0), 0, 0)
+	end
+	local topZ = prof(1)
+	box(f, w, 0.06, 0.06, M.dark, 0, h, topZ)
+	box(f, w, 0.05, 0.08, M.steel, 0, 0.02, 0.02)
+	local nr = ribs or 5
+	for i = 0, nr - 1 do
+		box(f, 0.04, h * 0.8, 0.06, paint, -w / 2 + w * (i + 0.5) / nr, h * 0.45, -h * 0.36)
+	end
+	local orange = st("#ff7a00")
+	for _, s in (if noStakes then {} else { -1, 1 }) do
+		rod(f, v(s * w * 0.48, h * 0.8, -h * 0.4), v(s * w * 0.48, h * 1.6, -h * 0.4), 0.015, orange)
+		ball(f, 0.03, orange, s * w * 0.48, h * 1.6, -h * 0.4)
+	end
+	return f
+end
+-- the visible load: an ellipsoid named "Load"; its centre sits on the floor of the container
+local function load(g: Frame, w: number, h: number, d: number, x: number, y: number, z: number)
+	local p = blob(g, w, h * 2, d, M.snow, x, y, z)
+	p.Name = "Load"
+	p.CastShadow = false
+	p:SetAttribute("FullHeight", h * 2 * S)
+	return p
+end
+
+-- ------------------------------------------------------------------ finishing
+local function newModel(name: string): (Model, Frame)
+	local model = Instance.new("Model")
+	model.Name = name
+	local root = Instance.new("Part")
+	root.Name = "Root"
+	root.Size = Vector3.new(0.4, 0.4, 0.4)
+	root.Transparency = 1
+	root.Anchored = true
+	root.CanCollide = false
+	root.CanQuery = false
+	root.CanTouch = false
+	root.CFrame = CFrame.new()
+	root.Parent = model
+	model.PrimaryPart = root
+	return model, { model = model, cf = CFrame.new() }
+end
+
+-- turn from +Z-forward to Roblox's -Z-forward
+local TURN = CFrame.Angles(0, math.pi, 0)
+local function finish(model: Model): Model
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d.Name ~= "Root" then
+			d.CFrame = TURN * d.CFrame
+		end
+	end
+	local seatOffset = model:GetAttribute("SeatOffset")
+	if typeof(seatOffset) == "Vector3" then
+		model:SetAttribute("SeatOffset", Vector3.new(-seatOffset.X, seatOffset.Y, -seatOffset.Z))
+	end
+	return model
+end
+
+-- ------------------------------------------------------------------ hand tools
+local SHOVELS = {
+	kidshovel = { len = 0.75, bw = 0.24, bh = 0.24, color = "#e53935", shaft = "#e53935", grip = "#ffeb3b", dg = true },
+	shovel = { len = 1.05, bw = 0.42, bh = 0.34, color = "#1e88e5", shaft = "#b07a45", grip = "#222222", dg = true },
+	bigshovel = { len = 1.15, bw = 0.56, bh = 0.4, color = "#43a047", shaft = "#8d6e63", grip = "#222222", dg = true },
+	megashovel = { len = 1.2, bw = 0.72, bh = 0.48, color = "#fb8c00", shaft = "#5d4037", grip = "#111111", dg = true },
+	steelshovel = { len = 1.2, bw = 0.66, bh = 0.5, color = "#9aa3ad", shaft = "#3e2723", grip = "#111111", dg = true, metal = true },
+	pusher = { len = 1.35, bw = 0.95, bh = 0.32, color = "#283593", shaft = "#9e9e9e", grip = "#111111", push = true },
+	twinpusher = { len = 1.3, bw = 1.2, bh = 0.5, color = "#c62828", shaft = "#616161", grip = "#111111", push = true, wheels = true },
+	sledscoop = { len = 1.2, bw = 1.0, bh = 0.42, color = "#6a1b9a", shaft = "#424242", grip = "#111111", push = true, sled = true },
+}
+
+function Models.BuildHandTool(id: string): Model
+	local model, g = newModel(id)
+	if id == "hands" then
+		load(g, 0.26, 0.13, 0.26, 0, -0.05, 0.06)
+	elseif id == "trowel" then
+		cylY(g, 0.03, 0.14, st("#2e7d32"), 0, 0, 0)
+		cylY(g, 0.01, 0.1, M.steel, 0, -0.12, 0)
+		local blade = st("#b9bec6", Enum.Material.Metal)
+		tri(g, v(-0.06, -0.17, 0.02), v(0.06, -0.17, 0.02), v(0, -0.38, 0.06), 0.015, blade)
+		box(g, 0.02, 0.18, 0.04, blade, -0.055, -0.25, 0.04, 0, 0, -0.28)
+		box(g, 0.02, 0.18, 0.04, blade, 0.055, -0.25, 0.04, 0, 0, 0.28)
+		load(g, 0.1, 0.05, 0.1, 0, -0.24, 0.07)
+	else
+		local P = SHOVELS[id] or SHOVELS.shovel
+		local shaftSt = st(P.shaft, Enum.Material.Wood)
+		cylY(g, 0.025, P.len, shaftSt, 0, -P.len / 2 + 0.1, 0)
+		local gripSt = st(P.grip)
+		if P.dg then
+			box(g, 0.16, 0.03, 0.03, gripSt, 0, 0.2, 0)
+			box(g, 0.025, 0.1, 0.025, gripSt, -0.07, 0.15, 0)
+			box(g, 0.025, 0.1, 0.025, gripSt, 0.07, 0.15, 0)
+		else
+			cylX(g, 0.022, 0.34, gripSt, 0, 0.12, 0)
+			cylX(g, 0.028, 0.1, st("#d32f2f", Enum.Material.Rubber), -0.15, 0.12, 0)
+			cylX(g, 0.028, 0.1, st("#d32f2f", Enum.Material.Rubber), 0.15, 0.12, 0)
+		end
+		local bladeSt = st(P.color, if P.metal then Enum.Material.Metal else Enum.Material.SmoothPlastic)
+		local b = sub(g, 0, -P.len + 0.08, 0)
+		cylY(b, 0.035, 0.12, M.steel, 0, 0.1, 0)
+		if P.push then
+			plow(b, P.bw, P.bh * 1.3, P.color, 0, -P.bh * 1.1, 0.12, 4, 0, true)
+			rod(b, v(0, 0.05, 0), v(P.bw * 0.35, -0.12, 0.0), 0.012, M.steel)
+			rod(b, v(0, 0.05, 0), v(-P.bw * 0.35, -0.12, 0.0), 0.012, M.steel)
+			if P.wheels then
+				wheel(b, 0.12, 0.06, -P.bw * 0.45, -0.3, -0.12, { lugs = 10, nuts = 4 })
+				wheel(b, 0.12, 0.06, P.bw * 0.45, -0.3, -0.12, { lugs = 10, nuts = 4 })
+			end
+			if P.sled then
+				for _, x in { -P.bw * 0.4, P.bw * 0.4 } do
+					box(b, 0.04, 0.03, 0.7, M.chrome, x, -0.42, -0.1)
+					box(b, 0.04, 0.03, 0.16, M.chrome, x, -0.37, 0.28, -0.7, 0, 0)
+				end
+				box(b, P.bw * 0.85, 0.2, 0.6, bladeSt, 0, -0.32, -0.1)
+			end
+			load(g, P.bw * 0.8, 0.18, 0.35, 0, -P.len + 0.08 - 0.35, 0.02)
+		else
+			local tilt = sub(b, 0, 0, 0, 0.35, 0, 0)
+			box(tilt, P.bw, P.bh, 0.02, bladeSt, 0, -P.bh / 2, 0)
+			box(tilt, P.bw, 0.02, P.bh * 0.9, bladeSt, 0, -P.bh, P.bh * 0.45)
+			for _, x in { -P.bw / 2, P.bw / 2 } do
+				tri(tilt, v(x, 0, 0), v(x, -P.bh, 0), v(x, -P.bh, P.bh * 0.9), 0.02, bladeSt)
+			end
+			box(tilt, P.bw, 0.025, 0.03, M.steel, 0, -P.bh, P.bh * 0.9)
+			for i = 0, 3 do
+				ball(tilt, 0.012, M.steel, -P.bw * 0.3 + i * P.bw * 0.2, -0.04, 0.012)
+			end
+			load(tilt, P.bw * 0.8, P.bh * 0.45, P.bh * 0.7, 0, -P.bh, P.bh * 0.45)
+		end
+	end
+	return finish(model)
+end
+
+-- ------------------------------------------------------------------ machines
+function Models.BuildMachine(id: string): Model
+	local model, g = newModel(id)
+	local seatPos = v(0, 1, 0)
+	local standing = false
+
+	if id == "blower" then
+		local paint = st("#d32f2f", Enum.Material.Metal)
+		arc(g, 0.36, 0.45, 0.32, 0, -math.pi, 8, 0.8, 0.03, paint) -- auger housing (open at the front)
+		cylX(g, 0.32, 0.03, paint, -0.4, 0.36, 0.45)
+		cylX(g, 0.32, 0.03, paint, 0.4, 0.36, 0.45)
+		box(g, 0.82, 0.04, 0.1, M.steel, 0, 0.04, 0.68)
+		box(g, 0.04, 0.1, 0.28, M.steel, -0.42, 0.06, 0.55)
+		box(g, 0.04, 0.1, 0.28, M.steel, 0.42, 0.06, 0.55)
+		auger(g, 0.76, 0.26, st("#fbc02d", Enum.Material.Metal), 0, 0.36, 0.5)
+		cylZ(g, 0.2, 0.2, paint, 0, 0.36, 0.2)
+		rod(g, v(0, 0.5, 0.22), v(0.08, 1.12, 0.26), 0.09, paint) -- chute
+		box(g, 0.22, 0.06, 0.26, paint, 0.1, 1.17, 0.34, 0.5, 0, 0)
+		rod(g, v(0.05, 0.6, 0.12), v(0.05, 0.9, -0.6), 0.012, M.steel)
+		box(g, 0.5, 0.36, 0.45, M.dark, 0, 0.62, -0.12)
+		for i = 0, 5 do
+			box(g, 0.52, 0.015, 0.03, M.steel, 0, 0.5 + i * 0.05, 0.1)
+		end
+		cylY(g, 0.09, 0.08, st("#212121"), 0.18, 0.86, -0.12)
+		box(g, 0.16, 0.12, 0.14, st("#424242"), -0.2, 0.84, -0.22)
+		cylZ(g, 0.04, 0.16, M.chrome, -0.29, 0.64, -0.3)
+		box(g, 0.6, 0.1, 0.8, M.dark, 0, 0.32, -0.25)
+		wheel(g, 0.26, 0.18, -0.4, 0.26, -0.45, { lugs = 14, rim = "#d32f2f" })
+		wheel(g, 0.26, 0.18, 0.4, 0.26, -0.45, { lugs = 14, rim = "#d32f2f" })
+		for _, x in { -0.27, 0.27 } do
+			rod(g, v(x, 0.42, -0.5), v(x, 1.05, -1.0), 0.02, M.black)
+			cylX(g, 0.03, 0.12, M.rubber, x, 1.05, -1.0)
+		end
+		rod(g, v(-0.27, 1.05, -1.0), v(0.27, 1.05, -1.0), 0.02, M.black)
+		box(g, 0.38, 0.12, 0.08, M.dark, 0, 0.92, -0.86, 0.6, 0, 0)
+		ball(g, 0.025, st("#4caf50", Enum.Material.Neon), -0.08, 0.96, -0.83)
+		ball(g, 0.025, st("#f44336", Enum.Material.Neon), 0.08, 0.96, -0.83)
+		headlight(g, 0.05, 0, 0.82, 0.12)
+		load(g, 0.4, 0.25, 0.35, 0, 0.8, -0.55)
+		seatPos, standing = v(0, 0, -1.45), true
+	elseif id == "tractor" then
+		local paint = st("#2e7d32", Enum.Material.Metal)
+		local yellow = st("#fdd835")
+		box(g, 0.7, 0.18, 1.9, M.dark, 0, 0.45, 0)
+		profile(g, { { 0.95, 0.55 }, { 0.95, 0.85 }, { 0.55, 1.0 }, { -0.1, 1.0 }, { -0.1, 0.55 } }, 0.72, paint)
+		for i = 0, 5 do
+			box(g, 0.74, 0.02, 0.025, M.black, 0, 0.62 + i * 0.04, 0.96)
+		end
+		headlight(g, 0.05, -0.2, 0.84, 0.94)
+		headlight(g, 0.05, 0.2, 0.84, 0.94)
+		box(g, 0.74, 0.05, 0.4, yellow, 0, 0.98, 0.45)
+		for _, s in { -1, 1 } do
+			arc(g, 0.42, -0.6, 0.46, -math.pi / 2, math.pi / 2, 8, 0.34, 0.03, paint, s * 0.62)
+		end
+		box(g, 1.2, 0.06, 0.7, paint, 0, 0.8, -0.6)
+		seat(g, 0, 0.87, -0.65, 1, "#fdd835")
+		steering(g, 0, 1.25, -0.1, 0.8)
+		wheel(g, 0.42, 0.3, -0.62, 0.42, -0.6, { rim = "#fdd835", lugs = 20 })
+		wheel(g, 0.42, 0.3, 0.62, 0.42, -0.6, { rim = "#fdd835", lugs = 20 })
+		wheel(g, 0.25, 0.18, -0.45, 0.25, 0.65, { rim = "#fdd835", lugs = 12 })
+		wheel(g, 0.25, 0.18, 0.45, 0.25, 0.65, { rim = "#fdd835", lugs = 12 })
+		rod(g, v(-0.3, 0.4, 0.6), v(-0.4, 0.35, 1.3), 0.03, M.dark)
+		rod(g, v(0.3, 0.4, 0.6), v(0.4, 0.35, 1.3), 0.03, M.dark)
+		plow(g, 1.7, 0.5, "#fdd835", 0, 0.02, 1.45)
+		cylY(g, 0.04, 0.5, M.chrome, 0.25, 1.15, 0.5)
+		-- towed dump cart
+		local cart = sub(g, 0, 0, -1.9)
+		rod(cart, v(0, 0.35, 0.95), v(0, 0.35, 0.45), 0.03, M.dark)
+		box(cart, 1.1, 0.06, 0.9, st("#1b5e20"), 0, 0.42, 0)
+		for _, s in { -1, 1 } do
+			box(cart, 0.05, 0.4, 0.9, st("#1b5e20"), s * 0.53, 0.62, 0)
+			box(cart, 1.1, 0.4, 0.05, st("#1b5e20"), 0, 0.62, s * 0.43)
+		end
+		wheel(cart, 0.22, 0.14, -0.62, 0.22, 0)
+		wheel(cart, 0.22, 0.14, 0.62, 0.22, 0)
+		load(g, 0.95, 0.35, 0.75, 0, 0.45, -1.9)
+		seatPos = v(0, 0.92, -0.62)
+	elseif id == "atv" then
+		local paint = st("#1565c0", Enum.Material.Metal)
+		box(g, 0.6, 0.2, 1.5, M.dark, 0, 0.5, 0)
+		profile(g, { { 0.9, 0.6 }, { 0.8, 0.85 }, { 0.35, 0.92 }, { -0.4, 1.0 }, { -0.85, 0.9 }, { -0.9, 0.6 } }, 0.75, paint)
+		for _, pz in { { -0.5, 0.55 }, { 0.5, 0.55 }, { -0.5, -0.55 }, { 0.5, -0.55 } } do
+			arc(g, 0.32, pz[2], 0.4, -math.pi / 2, math.pi / 2, 7, 0.34, 0.03, paint, pz[1])
+			wheel(g, 0.32, 0.26, pz[1], 0.32, pz[2], { lugs = 16, nuts = 4 })
+		end
+		box(g, 0.4, 0.14, 0.7, M.seat, 0, 1.08, -0.2)
+		rod(g, v(0, 1.0, 0.35), v(0, 1.25, 0.4), 0.03, M.black)
+		rod(g, v(-0.38, 1.25, 0.38), v(0.38, 1.25, 0.38), 0.02, M.black)
+		cylX(g, 0.03, 0.12, M.rubber, -0.36, 1.25, 0.38)
+		cylX(g, 0.03, 0.12, M.rubber, 0.36, 1.25, 0.38)
+		box(g, 0.18, 0.08, 0.06, M.black, 0, 1.22, 0.45)
+		for _, rz in { 0.75, -0.75 } do
+			for i = 0, 3 do
+				rod(g, v(-0.3 + i * 0.2, 1.0, rz - 0.2), v(-0.3 + i * 0.2, 1.0, rz + 0.2), 0.012, M.black)
+			end
+			rod(g, v(-0.35, 1.0, rz - 0.2), v(0.35, 1.0, rz - 0.2), 0.015, M.black)
+			rod(g, v(-0.35, 1.0, rz + 0.2), v(0.35, 1.0, rz + 0.2), 0.015, M.black)
+		end
+		headlight(g, 0.06, -0.2, 0.8, 0.92)
+		headlight(g, 0.06, 0.2, 0.8, 0.92)
+		box(g, 0.3, 0.05, 0.03, M.tail, 0, 0.82, -0.92)
+		cylX(g, 0.07, 0.26, M.dark, 0, 0.5, 1.0)
+		rod(g, v(-0.25, 0.4, 0.6), v(-0.3, 0.3, 1.35), 0.025, M.dark)
+		rod(g, v(0.25, 0.4, 0.6), v(0.3, 0.3, 1.35), 0.025, M.dark)
+		plow(g, 1.6, 0.42, "#212121", 0, 0.02, 1.45)
+		load(g, 0.6, 0.25, 0.4, 0, 1.02, -0.75)
+		seatPos = v(0, 1.08, -0.25)
+	elseif id == "snowmobile" then
+		local paint = st("#00897b", Enum.Material.Metal)
+		box(g, 0.55, 0.12, 1.6, M.dark, 0, 0.42, -0.4)
+		track(g, 1.3, 0.16, 0.42, 0, 0.2, -0.45, { color = "#1a1a1a", roadWheels = 4, pitch = 0.12 })
+		profile(g, { { 1.0, 0.35 }, { 1.05, 0.5 }, { 0.8, 0.8 }, { 0.35, 0.95 }, { 0.25, 0.6 }, { 0.2, 0.35 } }, 0.75, paint)
+		box(g, 0.76, 0.06, 0.4, st("#ffeb3b"), 0, 0.62, 0.65, -0.3, 0, 0)
+		box(g, 0.6, 0.35, 0.02, M.glass, 0, 1.08, 0.38, -0.5, 0, 0)
+		headlight(g, 0.07, -0.15, 0.6, 1.02)
+		headlight(g, 0.07, 0.15, 0.6, 1.02)
+		for _, s in { -1, 1 } do
+			rod(g, v(s * 0.3, 0.45, 0.6), v(s * 0.42, 0.12, 0.7), 0.025, M.dark)
+			box(g, 0.12, 0.04, 1.0, M.black, s * 0.42, 0.06, 0.75)
+			box(g, 0.12, 0.04, 0.2, M.black, s * 0.42, 0.12, 1.3, -0.6, 0, 0)
+			rod(g, v(s * 0.42, 0.18, 0.55), v(s * 0.42, 0.18, 0.95), 0.015, M.chrome)
+		end
+		box(g, 0.42, 0.18, 1.0, M.seat, 0, 0.6, -0.45)
+		rod(g, v(-0.35, 1.0, 0.3), v(0.35, 1.0, 0.3), 0.02, M.black)
+		rod(g, v(0, 0.8, 0.35), v(0, 1.0, 0.3), 0.03, M.black)
+		box(g, 0.4, 0.05, 0.03, M.tail, 0, 0.5, -1.21)
+		local sled = sub(g, 0, 0, -2.3)
+		rod(sled, v(0, 0.3, 1.0), v(0, 0.25, 0.55), 0.025, M.dark)
+		box(sled, 0.9, 0.05, 1.1, st("#004d40"), 0, 0.2, 0)
+		for _, s in { -1, 1 } do
+			box(sled, 0.05, 0.3, 1.1, st("#004d40"), s * 0.43, 0.35, 0)
+			box(sled, 0.06, 0.04, 1.2, M.chrome, s * 0.38, 0.12, 0)
+		end
+		load(g, 0.8, 0.35, 0.95, 0, 0.25, -2.3)
+		seatPos = v(0, 0.68, -0.4)
+	elseif id == "pickup" then
+		local paint = st("#37474f", Enum.Material.Metal)
+		box(g, 1.7, 0.25, 4.6, M.dark, 0, 0.6, 0)
+		box(g, 1.9, 0.6, 1.7, paint, 0, 1.05, 1.45) -- hood block
+		box(g, 1.9, 0.6, 1.2, paint, 0, 1.05, 0.0) -- cab lower
+		profile(g, { { 0.6, 1.35 }, { 0.35, 2.0 }, { -0.55, 2.0 }, { -0.6, 1.35 } }, 1.9, paint) -- cab upper
+		box(g, 1.7, 0.6, 0.02, M.glass, 0, 1.67, 0.5, -0.38, 0, 0)
+		for _, s in { -1, 1 } do
+			box(g, 0.02, 0.5, 0.8, M.glass, s * 0.955, 1.65, -0.1)
+		end
+		box(g, 1.6, 0.45, 0.02, M.glass, 0, 1.68, -0.61)
+		box(g, 1.9, 0.1, 2.0, paint, 0, 0.85, -1.65)
+		for _, s in { -1, 1 } do
+			box(g, 0.08, 0.55, 2.0, paint, s * 0.91, 1.15, -1.65)
+		end
+		box(g, 1.9, 0.55, 0.08, paint, 0, 1.15, -2.62)
+		box(g, 1.82, 0.04, 0.04, M.chrome, 0, 1.45, -2.62)
+		box(g, 0.55, 0.45, 0.55, st("#ef6c00"), 0, 1.45, -2.3, 0, math.pi / 4, 0) -- salt spreader
+		cylY(g, 0.2, 0.03, M.black, 0, 0.75, -2.85)
+		box(g, 1.4, 0.4, 0.04, M.chrome, 0, 1.0, 2.31)
+		for i = 0, 4 do
+			box(g, 1.3, 0.03, 0.05, M.black, 0, 0.85 + i * 0.07, 2.33)
+		end
+		for _, s in { -1, 1 } do
+			box(g, 0.3, 0.15, 0.05, M.light, s * 0.75, 1.1, 2.31)
+			box(g, 0.12, 0.3, 0.04, M.tail, s * 0.9, 1.15, -2.66)
+		end
+		box(g, 1.95, 0.18, 0.2, M.chrome, 0, 0.68, -2.7)
+		box(g, 1.4, 0.08, 0.15, M.black, 0, 2.06, -0.1)
+		for i = 0, 5 do
+			box(g, 0.18, 0.05, 0.02, if i % 2 == 1 then M.amber else M.light, -0.55 + i * 0.22, 2.06, -0.02)
+		end
+		mirror(g, 0.95, 1.5, 0.45, 1)
+		mirror(g, -0.95, 1.5, 0.45, -1)
+		for _, p in { { -0.85, 1.5 }, { 0.85, 1.5 }, { -0.85, -1.6 }, { 0.85, -1.6 } } do
+			wheel(g, 0.45, 0.32, p[1], 0.45, p[2], { lugs = 22, nuts = 8 })
+		end
+		for _, s in { -1, 1 } do
+			plow(g, 1.5, 0.8, "#f9a825", s * 0.68, 0.02, 3.05, 4, s * 0.35)
+		end
+		box(g, 0.6, 0.4, 0.5, M.dark, 0, 0.6, 2.6)
+		rod(g, v(0, 0.6, 2.35), v(0, 1.1, 2.6), 0.05, M.chrome)
+		load(g, 1.6, 0.45, 1.8, 0, 0.9, -1.65)
+		seat(g, -0.4, 1.0, -0.2, 1)
+		steering(g, -0.4, 1.45, 0.25, 1.1)
+		seatPos = v(-0.4, 1.05, -0.2)
+	elseif id == "skidsteer" then
+		local paint = st("#f9a825", Enum.Material.Metal)
+		box(g, 1.5, 0.7, 2.2, paint, 0, 0.8, -0.2)
+		box(g, 1.52, 0.1, 2.22, M.black, 0, 0.48, -0.2)
+		for i = 0, 5 do
+			box(g, 1.0, 0.04, 0.04, M.black, 0, 0.7 + i * 0.1, -1.32)
+		end
+		box(g, 0.3, 0.2, 0.04, M.tail, -0.6, 1.05, -1.32)
+		box(g, 0.3, 0.2, 0.04, M.tail, 0.6, 1.05, -1.32)
+		for _, p in { { -0.55, 0.45 }, { 0.55, 0.45 }, { -0.55, -0.7 }, { 0.55, -0.7 } } do
+			box(g, 0.08, 1.2, 0.08, M.black, p[1], 1.75, p[2])
+		end
+		box(g, 1.2, 0.1, 1.25, paint, 0, 2.38, -0.12)
+		for i = 0, 5 do
+			box(g, 0.02, 1.1, 0.02, M.black, -0.45 + i * 0.18, 1.75, 0.47)
+		end
+		box(g, 1.0, 1.0, 0.02, M.glass, 0, 1.75, -0.72)
+		for _, s in { -1, 1 } do
+			box(g, 0.02, 1.0, 1.1, M.glass, s * 0.56, 1.75, -0.12)
+		end
+		seat(g, 0, 1.22, -0.25, 1)
+		beacon(g, 0.4, 2.43, -0.5)
+		for _, s in { -1, 1 } do
+			rod(g, v(s * 0.82, 1.9, -0.9), v(s * 0.82, 1.3, 0.7), 0.08, paint)
+			rod(g, v(s * 0.82, 1.3, 0.7), v(s * 0.82, 0.5, 1.25), 0.08, paint)
+			rod(g, v(s * 0.82, 0.8, -0.2), v(s * 0.82, 1.4, 0.6), 0.05, M.chrome)
+		end
+		local bk = sub(g, 0, 0.05, 1.4)
+		box(bk, 2.0, 0.05, 0.85, M.dark, 0, 0, 0.1)
+		box(bk, 2.0, 0.9, 0.05, M.dark, 0, 0.45, -0.32)
+		for _, s in { -1, 1 } do
+			tri(bk, v(s, 0, -0.32), v(s, 0, 0.52), v(s, 0.9, -0.32), 0.05, M.dark)
+		end
+		box(bk, 2.0, 0.04, 0.08, M.steel, 0, 0.02, 0.55)
+		for i = 0, 5 do
+			box(bk, 0.08, 0.06, 0.15, M.steel, -0.85 + i * 0.34, 0.02, 0.62)
+		end
+		load(g, 1.8, 0.5, 0.75, 0, 0.1, 1.5)
+		for _, p in { { -0.85, 0.5 }, { 0.85, 0.5 }, { -0.85, -0.85 }, { 0.85, -0.85 } } do
+			wheel(g, 0.42, 0.34, p[1], 0.42, p[2], { lugs = 14, rim = "#f9a825" })
+		end
+		headlight(g, 0.06, -0.62, 2.25, 0.5)
+		headlight(g, 0.06, 0.62, 2.25, 0.5)
+		seatPos = v(0, 1.28, -0.25)
+	elseif id == "resurfacer" then
+		local paint = st("#1565c0", Enum.Material.Metal)
+		local white = st("#eceff1", Enum.Material.SmoothPlastic)
+		box(g, 2.0, 1.0, 3.6, white, 0, 0.95, 0)
+		box(g, 2.04, 0.18, 3.64, paint, 0, 0.55, 0)
+		box(g, 2.04, 0.1, 3.64, paint, 0, 1.3, 0)
+		local tank = sub(g, 0, 1.45, 0.6)
+		box(tank, 2.0, 0.9, 0.06, white, 0, 0.45, 1.2)
+		box(tank, 2.0, 0.9, 0.06, white, 0, 0.45, -0.95)
+		for _, s in { -1, 1 } do
+			box(tank, 0.06, 0.9, 2.2, white, s * 0.98, 0.45, 0.12)
+			box(tank, 0.12, 0.1, 2.26, paint, s * 0.98, 0.92, 0.12)
+		end
+		box(tank, 2.08, 0.1, 0.12, paint, 0, 0.92, 1.2)
+		box(tank, 2.08, 0.1, 0.12, paint, 0, 0.92, -0.95)
+		box(tank, 0.06, 0.06, 2.2, M.steel, 0, 0.97, 0.12)
+		load(g, 1.85, 0.75, 2.0, 0, 1.45, 0.75)
+		for _, s in { -1, 1 } do
+			box(g, 0.02, 0.2, 2.6, st("#e53935"), s * 1.03, 1.05, 0)
+		end
+		box(g, 0.9, 0.1, 1.0, M.dark, -0.55, 1.45, -1.3)
+		seat(g, -0.55, 1.55, -1.45, 1, "#1565c0")
+		steering(g, -0.55, 1.95, -0.95, 0.5)
+		box(g, 0.6, 0.6, 0.12, M.dark, -0.55, 1.75, -0.8)
+		ball(g, 0.03, st("#4caf50", Enum.Material.Neon), -0.75, 1.95, -0.73)
+		ball(g, 0.03, st("#ffeb3b", Enum.Material.Neon), -0.55, 1.95, -0.73)
+		ball(g, 0.03, st("#f44336", Enum.Material.Neon), -0.35, 1.95, -0.73)
+		box(g, 2.2, 0.35, 0.4, M.steel, 0, 0.3, -2.0)
+		box(g, 2.1, 0.06, 0.6, st("#90caf9", Enum.Material.Fabric), 0, 0.05, -2.4)
+		auger(g, 2.0, 0.14, M.steel, 0, 0.25, -2.0)
+		for _, s in { -1, 1 } do
+			cylY(g, 0.25, 0.08, st("#212121"), s * 1.05, 0.1, -1.8)
+			for i = 0, 11 do
+				local a = i / 12 * math.pi * 2
+				box(g, 0.02, 0.08, 0.12, st("#ffca28"), s * 1.05 + math.cos(a) * 0.25, 0.08, -1.8 + math.sin(a) * 0.25, 0, -a, 0)
+			end
+		end
+		headlight(g, 0.08, -0.6, 0.8, 1.82)
+		headlight(g, 0.08, 0.6, 0.8, 1.82)
+		beacon(g, 0.6, 2.55, 1.7)
+		cylY(g, 0.05, 0.5, M.chrome, 0.85, 1.65, -1.6)
+		for _, p in { { -1.0, 1.2 }, { 1.0, 1.2 }, { -1.0, -1.2 }, { 1.0, -1.2 } } do
+			wheel(g, 0.42, 0.3, p[1], 0.42, p[2], { lugs = 16 })
+		end
+		seatPos = v(-0.55, 1.6, -1.45)
+	elseif id == "snowcat" then
+		local paint = st("#e53935", Enum.Material.Metal)
+		for _, s in { -1, 1 } do
+			track(g, 3.4, 0.5, 0.9, s * 1.35, 0.5, -0.2, { color = "#2a2a2a", roadWheels = 6, pitch = 0.22, wheel = "#555555" })
+			box(g, 1.0, 0.08, 4.3, paint, s * 1.35, 1.08, -0.2)
+		end
+		box(g, 1.8, 0.8, 4.2, M.dark, 0, 1.0, -0.2)
+		box(g, 2.4, 0.7, 4.3, paint, 0, 1.75, -0.15) -- lower body
+		profile(g, { { 2.0, 2.0 }, { 1.2, 2.1 }, { -0.9, 2.1 }, { -0.9, 2.0 } }, 2.4, paint)
+		box(g, 2.4, 1.05, 0.1, paint, 0, 2.62, -0.85) -- cab back
+		box(g, 2.4, 0.1, 1.95, paint, 0, 3.2, 0.1) -- roof
+		for _, p in { { -1.17, 1.0 }, { 1.17, 1.0 }, { -1.17, -0.8 }, { 1.17, -0.8 } } do
+			box(g, 0.08, 1.1, 0.08, M.black, p[1], 2.65, p[2])
+		end
+		box(g, 2.2, 0.95, 0.02, M.glass, 0, 2.65, 1.0, -0.18, 0, 0)
+		for _, s in { -1, 1 } do
+			box(g, 0.02, 0.85, 1.6, M.glass, s * 1.18, 2.65, 0.1)
+		end
+		box(g, 2.0, 0.12, 0.25, M.black, 0, 3.32, 0.75)
+		for i = 0, 5 do
+			box(g, 0.22, 0.08, 0.02, M.light, -0.8 + i * 0.32, 3.32, 0.88)
+		end
+		beacon(g, -0.8, 3.27, -0.6)
+		beacon(g, 0.8, 3.27, -0.6)
+		cylY(g, 0.06, 0.8, M.chrome, 0.9, 2.5, -1.8)
+		for i = 0, 4 do
+			box(g, 2.0, 0.04, 0.04, M.black, 0, 1.5 + i * 0.1, 2.01)
+		end
+		headlight(g, 0.1, -0.8, 1.9, 2.0)
+		headlight(g, 0.1, 0.8, 1.9, 2.0)
+		seat(g, -0.45, 2.15, 0.1, 1.1)
+		steering(g, -0.45, 2.55, 0.6, 0.7)
+		for _, s in { -1, 1 } do
+			rod(g, v(s * 0.9, 1.1, 1.6), v(s * 1.1, 0.7, 2.8), 0.09, M.dark)
+			rod(g, v(s * 0.5, 1.5, 1.9), v(s * 0.6, 1.0, 2.8), 0.05, M.chrome)
+		end
+		plow(g, 4.0, 1.1, "#e53935", 0, 0.02, 3.2, 8)
+		box(g, 3.6, 0.5, 0.7, paint, 0, 0.6, -2.9)
+		auger(g, 3.4, 0.25, M.steel, 0, 0.35, -2.9)
+		box(g, 3.6, 0.04, 0.6, st("#9e9e9e"), 0, 0.08, -3.45)
+		for i = 0, 23 do
+			box(g, 0.02, 0.05, 0.08, M.dark, -1.75 + i * 0.152, 0.05, -3.78)
+		end
+		box(g, 1.9, 0.1, 1.2, M.dark, 0, 2.15, -1.55)
+		for _, s in { -1, 1 } do
+			box(g, 0.05, 0.4, 1.2, paint, s * 0.95, 2.35, -1.55)
+		end
+		load(g, 1.75, 0.55, 1.1, 0, 2.2, -1.55)
+		seatPos = v(-0.45, 2.22, 0.1)
+	elseif id == "loader" then
+		local paint = st("#fbc02d", Enum.Material.Metal)
+		box(g, 2.0, 1.2, 2.6, paint, 0, 1.5, -1.4)
+		box(g, 2.1, 0.3, 0.6, M.dark, 0, 1.0, -2.8)
+		for i = 0, 5 do
+			box(g, 1.6, 0.05, 0.05, M.black, 0, 1.4 + i * 0.12, -2.71)
+		end
+		cylY(g, 0.08, 1.0, M.dark, 0.6, 2.5, -2.2)
+		cylY(g, 0.12, 0.3, M.dark, -0.6, 2.25, -2.3)
+		box(g, 1.6, 0.1, 1.6, paint, 0, 3.55, -0.6)
+		for _, p in { { -0.75, 0.15 }, { 0.75, 0.15 }, { -0.75, -1.35 }, { 0.75, -1.35 } } do
+			box(g, 0.08, 1.4, 0.08, M.black, p[1], 2.85, p[2])
+		end
+		box(g, 1.45, 1.3, 0.02, M.glass, 0, 2.85, 0.17)
+		box(g, 1.45, 1.2, 0.02, M.glass, 0, 2.85, -1.36)
+		for _, s in { -1, 1 } do
+			box(g, 0.02, 1.25, 1.45, M.glass, s * 0.77, 2.85, -0.6)
+			headlight(g, 0.07, s * 0.65, 3.5, 0.2)
+			mirror(g, s * 0.8, 3.1, 0.15, s)
+		end
+		seat(g, 0, 2.2, -0.8, 1.1)
+		steering(g, 0, 2.6, -0.2, 0.7)
+		beacon(g, 0.6, 3.6, -1.2)
+		for i = 0, 3 do
+			box(g, 0.3, 0.03, 0.12, M.steel, -1.05, 0.8 + i * 0.3, -0.4)
+		end
+		cylY(g, 0.25, 0.6, M.dark, 0, 1.0, 0.1)
+		box(g, 1.6, 0.7, 1.6, paint, 0, 1.0, 1.0)
+		for _, s in { -1, 1 } do
+			rod(g, v(s * 0.7, 1.4, 0.4), v(s * 0.7, 1.4, 2.4), 0.14, paint)
+			rod(g, v(s * 0.7, 1.4, 2.4), v(s * 0.7, 0.8, 3.0), 0.14, paint)
+			rod(g, v(s * 0.5, 0.9, 0.6), v(s * 0.5, 1.3, 1.8), 0.08, M.chrome)
+		end
+		rod(g, v(0, 1.9, 1.0), v(0, 1.6, 2.4), 0.1, M.chrome)
+		local bk = sub(g, 0, 0.06, 3.2)
+		arc(bk, 0.75, 0.1, 0.75, math.pi * 0.85, math.pi * 1.6, 9, 3.0, 0.05, M.dark)
+		for _, s in { -1, 1 } do
+			tri(bk, v(s * 1.5, 0, -0.6), v(s * 1.5, 0, 0.85), v(s * 1.5, 1.4, -0.65), 0.06, M.dark)
+		end
+		box(bk, 3.0, 0.05, 0.12, M.steel, 0, 0.02, 0.8)
+		for i = 0, 7 do
+			box(bk, 0.12, 0.08, 0.2, M.steel, -1.3 + i * 0.37, 0.03, 0.9)
+		end
+		load(g, 2.8, 0.7, 1.2, 0, 0.1, 3.25)
+		for _, p in { { -1.15, 1.0 }, { 1.15, 1.0 }, { -1.15, -1.5 }, { 1.15, -1.5 } } do
+			wheel(g, 0.85, 0.6, p[1], 0.85, p[2], { lugs = 20, rim = "#fbc02d", nuts = 10 })
+		end
+		seatPos = v(0, 2.3, -0.8)
+	elseif id == "rotary" then
+		local paint = st("#ff6f00", Enum.Material.Metal)
+		local white = st("#eceff1")
+		box(g, 2.0, 0.35, 7.0, M.dark, 0, 0.85, -0.6)
+		box(g, 2.4, 1.6, 1.8, paint, 0, 2.1, 1.6)
+		box(g, 2.42, 0.2, 1.82, white, 0, 1.6, 1.6)
+		box(g, 2.2, 0.85, 0.02, M.glass, 0, 2.45, 2.51)
+		for _, s in { -1, 1 } do
+			box(g, 0.02, 0.75, 1.3, M.glass, s * 1.21, 2.45, 1.7)
+			mirror(g, s * 1.2, 2.6, 2.3, s)
+		end
+		box(g, 2.2, 0.15, 0.3, M.black, 0, 3.0, 2.3)
+		for i = 0, 5 do
+			box(g, 0.25, 0.08, 0.02, M.light, -0.8 + i * 0.32, 3.0, 2.46)
+		end
+		beacon(g, -1.0, 2.95, 1.0)
+		beacon(g, 1.0, 2.95, 1.0)
+		seat(g, -0.5, 1.75, 1.4, 1.1)
+		steering(g, -0.5, 2.2, 2.0, 0.9)
+		box(g, 2.3, 1.4, 2.0, paint, 0, 2.0, -0.4)
+		for i = 0, 7 do
+			box(g, 0.02, 0.9, 0.12, M.black, 1.16, 2.0, -1.2 + i * 0.22)
+		end
+		cylY(g, 0.1, 1.4, M.chrome, 0.9, 3.2, -0.9)
+		box(g, 2.4, 0.12, 2.8, paint, 0, 1.1, -2.9)
+		for _, s in { -1, 1 } do
+			box(g, 0.08, 1.2, 2.8, paint, s * 1.18, 1.7, -2.9)
+			box(g, 0.15, 0.3, 0.05, M.tail, s * 1.05, 0.9, -4.35)
+		end
+		box(g, 2.4, 1.2, 0.08, paint, 0, 1.7, -4.28)
+		box(g, 2.4, 1.2, 0.08, paint, 0, 1.7, -1.52)
+		for i = 0, 4 do
+			box(g, 0.05, 1.1, 0.05, M.dark, 1.24, 1.7, -4.1 + i * 0.6)
+		end
+		load(g, 2.25, 0.9, 2.6, 0, 1.15, -2.9)
+		-- rotary head: two drums, impeller and chute
+		local head = sub(g, 0, 0, 3.0)
+		box(head, 3.4, 1.6, 0.1, paint, 0, 1.0, -0.5)
+		box(head, 3.4, 0.1, 1.2, paint, 0, 1.75, 0.05)
+		for _, s in { -1, 1 } do
+			box(head, 0.1, 1.6, 1.2, paint, s * 1.7, 1.0, 0.05)
+			local drum = sub(head, s * 0.85, 0.85, 0.1)
+			cylZ(drum, 0.12, 0.9, M.steel, 0, 0, 0)
+			for i = 0, 17 do
+				local t = i / 18
+				local a = t * math.pi * 4
+				box(drum, 0.08, 0.6, 0.05, st("#fdd835", Enum.Material.Metal), math.cos(a) * 0.4, math.sin(a) * 0.4, -0.4 + t * 0.85, 0, 0, a)
+			end
+		end
+		box(head, 3.4, 0.08, 0.15, M.steel, 0, 0.06, 0.6)
+		cylY(head, 0.3, 1.6, paint, 0, 2.5, -0.3)
+		box(head, 0.6, 0.25, 0.7, paint, 0, 3.3, -0.05, 0.35, 0, 0)
+		for _, wz in { 1.0, -2.3, -3.6 } do
+			for _, s in { -1, 1 } do
+				wheel(g, 0.55, 0.4, s * 1.05, 0.55, wz, { lugs = 22, nuts = 10 })
+			end
+		end
+		headlight(g, 0.09, -0.9, 1.35, 2.52)
+		headlight(g, 0.09, 0.9, 1.35, 2.52)
+		seatPos = v(-0.5, 1.8, 1.4)
+	end
+
+	model:SetAttribute("SeatOffset", seatPos * S)
+	model:SetAttribute("Standing", standing)
+	return finish(model)
+end
+
+function Models.Build(id: string): Model
+	local tool = Config.GetTool(id)
+	if tool.kind == "hand" then
+		return Models.BuildHandTool(id)
+	end
+	return Models.BuildMachine(id)
+end
+
+-- ------------------------------------------------------------------ people & props
+-- Blocky NPC (no Humanoid), feet at origin, facing -Z.
+function Models.BuildNPC(coat: string, hat: string, scarf: string): Model
+	local model, g = newModel("Vendor")
+	local skin = st("#f1c6a0")
+	local pants = st("#3e2723", Enum.Material.Fabric)
+	box(g, 0.18, 0.75, 0.2, pants, -0.12, 0.45, 0)
+	box(g, 0.18, 0.75, 0.2, pants, 0.12, 0.45, 0)
+	box(g, 0.2, 0.12, 0.3, st("#3a2a20"), -0.12, 0.06, 0.04)
+	box(g, 0.2, 0.12, 0.3, st("#3a2a20"), 0.12, 0.06, 0.04)
+	box(g, 0.55, 0.7, 0.32, st(coat, Enum.Material.Fabric), 0, 1.18, 0)
+	box(g, 0.02, 0.6, 0.02, M.steel, 0, 1.18, 0.17)
+	cylY(g, 0.17, 0.12, st(scarf, Enum.Material.Fabric), 0, 1.56, 0)
+	box(g, 0.09, 0.3, 0.04, st(scarf, Enum.Material.Fabric), 0.1, 1.4, 0.18, 0, 0, 0.15)
+	box(g, 0.16, 0.62, 0.18, st(coat, Enum.Material.Fabric), -0.36, 1.2, 0)
+	box(g, 0.16, 0.62, 0.18, st(coat, Enum.Material.Fabric), 0.36, 1.2, 0)
+	ball(g, 0.085, st("#24324a", Enum.Material.Fabric), -0.36, 0.86, 0)
+	ball(g, 0.085, st("#24324a", Enum.Material.Fabric), 0.36, 0.86, 0)
+	ball(g, 0.2, skin, 0, 1.8, 0)
+	ball(g, 0.025, M.black, -0.07, 1.83, 0.18)
+	ball(g, 0.025, M.black, 0.07, 1.83, 0.18)
+	ball(g, 0.035, st("#f08a7a"), 0, 1.78, 0.2)
+	cylY(g, 0.21, 0.16, st(hat, Enum.Material.Fabric), 0, 1.95, 0)
+	cylY(g, 0.22, 0.07, st("#e8eef7", Enum.Material.Fabric), 0, 1.87, 0)
+	ball(g, 0.07, st("#e8eef7", Enum.Material.Fabric), 0, 2.08, 0)
+	return finish(model)
+end
+
+-- Market stall with counter, striped awning and a sign. Faces -Z after finishing.
+function Models.BuildStall(color: string, stripe: string, sign: string, width: number): Model
+	local model, g = newModel("Stall")
+	local wood = M.wood
+	box(g, width, 1.0, 0.8, wood, 0, 0.5, 0.6)
+	box(g, width + 0.1, 0.08, 0.95, st("#6d4c41", Enum.Material.Wood), 0, 1.04, 0.6)
+	for _, x in { -width / 2 + 0.1, width / 2 - 0.1 } do
+		box(g, 0.12, 2.6, 0.12, wood, x, 1.3, 0.95)
+		box(g, 0.12, 2.9, 0.12, wood, x, 1.45, -0.4)
+	end
+	box(g, width, 2.6, 0.1, st("#8d6e63", Enum.Material.Wood), 0, 1.4, -0.45)
+	local stripes = 9
+	for i = 0, stripes - 1 do
+		local w = width / stripes
+		local c = if i % 2 == 1 then stripe else color
+		box(g, w, 0.06, 1.7, st(c, Enum.Material.Fabric), -width / 2 + w * (i + 0.5), 2.85, 0.4, 0.22, 0, 0)
+		box(g, w, 0.3, 0.04, st(c, Enum.Material.Fabric), -width / 2 + w * (i + 0.5), 2.55, 1.25)
+	end
+	box(g, width, 0.08, 1.6, M.snow, 0, 2.95, 0.38, 0.22, 0, 0)
+	local board = box(g, width * 0.82, width * 0.22, 0.08, st("#3e2723", Enum.Material.Wood), 0, 3.4, -0.34)
+	board.Name = "SignBoard"
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Back -- +Z before finishing, so it faces the customers afterwards
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	sg.PixelsPerStud = 40
+	sg.Parent = board
+	local tl = Instance.new("TextLabel")
+	tl.Size = UDim2.fromScale(1, 1)
+	tl.BackgroundTransparency = 1
+	tl.Text = sign
+	tl.TextScaled = true
+	tl.Font = Enum.Font.FredokaOne
+	tl.TextColor3 = Color3.fromHex("#fff8e1")
+	tl.Parent = sg
+	return finish(model)
+end
+
+-- Spin wheel disc (8 coloured triangles + labels), centre at origin, facing -Z (toward
+-- whoever stands in front of it). Segment i is centred at the top when the disc's Z
+-- rotation equals i * 45 degrees.
+function Models.BuildWheel(radiusM: number): Model
+	local model, g = newModel("Wheel")
+	local n = #Config.Wheel
+	local seg = math.pi * 2 / n
+	local r = radiusM
+	for i, s in Config.Wheel do
+		local centre = math.pi / 2 - (i - 1) * seg
+		local a0, a1 = centre - seg / 2, centre + seg / 2
+		tri(g, v(0, 0, 0), v(math.cos(a0) * r, math.sin(a0) * r, 0), v(math.cos(a1) * r, math.sin(a1) * r, 0), 0.06, st(s.color))
+		-- label plate along the segment's radius
+		local plate = box(g, r * 0.62, r * 0.16, 0.01, st(s.color), math.cos(centre) * r * 0.56, math.sin(centre) * r * 0.56, 0.04, 0, 0, centre)
+		plate.Transparency = 1
+		plate.Name = "Label" .. i
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = Enum.NormalId.Back
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		sg.PixelsPerStud = 50
+		sg.LightInfluence = 0
+		sg.Parent = plate
+		local tl = Instance.new("TextLabel")
+		tl.Size = UDim2.fromScale(1, 1)
+		tl.BackgroundTransparency = 1
+		tl.Text = s.label
+		tl.TextScaled = true
+		tl.Font = Enum.Font.FredokaOne
+		tl.TextColor3 = Color3.new(1, 1, 1)
+		tl.TextStrokeTransparency = 0.4
+		tl.Parent = sg
+		-- rim pegs
+		ball(g, 0.06, st("#ffffff", Enum.Material.Neon), math.cos(a0) * r, math.sin(a0) * r, 0.04)
+	end
+	-- gold rim made of short segments, and a hub
+	for k = 0, 31 do
+		local a = k / 32 * math.pi * 2
+		box(g, 0.12, r * 2 * math.sin(math.pi / 32) * 1.1, 0.12, st("#ffd54f", Enum.Material.Metal), math.cos(a) * r, math.sin(a) * r, 0, 0, 0, a)
+	end
+	cylZ(g, r * 0.15, 0.14, st("#ffd54f", Enum.Material.Metal), 0, 0, 0.02)
+	return finish(model)
+end
+
+
+-- ------------------------------------------------------------------ scenery
+-- Low-poly pine: six-sided cone tiers with a snowy top. Origin at the trunk base.
+function Models.BuildPine(k: number): Model
+	local model, g = newModel("Pine")
+	cylY(g, 0.2 * k, 1.2 * k, st("#5d4037", Enum.Material.Wood), 0, 0.6 * k, 0)
+	local green = st("#2f5d3a", Enum.Material.Grass)
+	local sides = 6
+	for tier = 0, 2 do
+		local r = (1.7 - tier * 0.45) * k
+		local h = 1.7 * k
+		local y = (1.0 + tier * 1.05) * k
+		local style = if tier == 2 then M.snow else green
+		local apex = v(0, y + h, 0)
+		for i = 0, sides - 1 do
+			local a0, a1 = i / sides * math.pi * 2, (i + 1) / sides * math.pi * 2
+			tri(g, apex, v(math.cos(a0) * r, y, math.sin(a0) * r), v(math.cos(a1) * r, y, math.sin(a1) * r), 0.08, style)
+		end
+		-- snow ring on the lower tiers
+		if tier < 2 then
+			cylY(g, r * 0.45, 0.12 * k, M.snow, 0, y + h * 0.62, 0)
+		end
+	end
+	return model
+end
+
+-- House with a gabled, snow-covered roof. Front door faces -Z after finishing.
+function Models.BuildHouse(w: number, d: number, color: string, extras: boolean): Model
+	local model, g = newModel("House")
+	local wall = st(color, Enum.Material.Brick)
+	local trim = st("#f5f1e8")
+	local roof = st("#5d4037", Enum.Material.Slate)
+	local h = 3.2
+	box(g, w, h, d, wall, 0, h / 2, 0)
+	box(g, w + 0.1, 0.3, d + 0.1, st("#8e8e8e", Enum.Material.Concrete), 0, 0.15, 0)
+	-- gable ends
+	local rh = 2.2
+	for _, x in { -w / 2, w / 2 } do
+		tri(g, v(x, h, -d / 2), v(x, h, d / 2), v(x, h + rh, 0), 0.1, wall)
+	end
+	-- roof planes and snow
+	local half = d / 2 + 0.5
+	local slope = math.atan2(rh, half)
+	local len = math.sqrt(half * half + rh * rh)
+	for _, s in { -1, 1 } do
+		box(g, w + 0.8, 0.15, len, roof, 0, h + rh / 2, s * half / 2, s * slope, 0, 0)
+		box(g, w + 0.9, 0.18, len * 0.98, M.snow, 0, h + rh / 2 + 0.16, s * half / 2, s * slope, 0, 0)
+	end
+	box(g, 0.7, 2, 0.7, st("#8d4b3a", Enum.Material.Brick), w * 0.25, h + 1.6, -d * 0.15)
+	box(g, 0.8, 0.15, 0.8, M.snow, w * 0.25, h + 2.65, -d * 0.15)
+	-- front (+Z here)
+	box(g, 1.1, 2.1, 0.08, st("#5b3a29", Enum.Material.Wood), 0, 1.05, d / 2 + 0.04)
+	ball(g, 0.05, st("#d4af37", Enum.Material.Metal), 0.4, 1.05, d / 2 + 0.1)
+	box(g, 1.3, 0.12, 0.1, trim, 0, 2.15, d / 2 + 0.05)
+	local win = st("#ffe7a3", Enum.Material.Neon)
+	for _, x in { -w * 0.3, w * 0.3 } do
+		box(g, 1.2, 1.0, 0.06, win, x, 1.8, d / 2 + 0.03)
+		box(g, 1.35, 0.1, 0.12, trim, x, 1.25, d / 2 + 0.06)
+		box(g, 0.06, 1.0, 0.1, trim, x, 1.8, d / 2 + 0.06)
+		box(g, 1.2, 0.06, 0.1, trim, x, 1.8, d / 2 + 0.06)
+	end
+	for _, s in { -1, 1 } do
+		box(g, 0.06, 1.0, 1.2, win, s * (w / 2 + 0.03), 1.8, 0)
+	end
+	box(g, 1.8, 0.2, 0.8, st("#9e9e9e", Enum.Material.Concrete), 0, 0.1, d / 2 + 0.4)
+	-- wreath
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		ball(g, 0.08, st("#2e7d32", Enum.Material.Grass), math.cos(a) * 0.2, 1.6 + math.sin(a) * 0.2, d / 2 + 0.12)
+	end
+	ball(g, 0.07, st("#c62828"), 0, 1.4, d / 2 + 0.16)
+	if extras then
+		cylY(g, 0.05, 1.1, st("#5d4037", Enum.Material.Wood), w * 0.45, 0.55, d / 2 + 2.6)
+		box(g, 0.3, 0.25, 0.45, st("#263238", Enum.Material.Metal), w * 0.45, 1.2, d / 2 + 2.6)
+	end
+	return finish(model)
+end
+
+function Models.BuildLamp(): Model
+	local model, g = newModel("Lamp")
+	local iron = st("#1f2a33", Enum.Material.Metal)
+	cylY(g, 0.1, 4, iron, 0, 2, 0)
+	cylY(g, 0.25, 0.3, iron, 0, 0.15, 0)
+	local bulb = box(g, 0.4, 0.5, 0.4, st("#fff3c4", Enum.Material.Neon), 0, 4.2, 0)
+	box(g, 0.55, 0.08, 0.55, iron, 0, 4.48, 0)
+	box(g, 0.6, 0.08, 0.6, M.snow, 0, 4.55, 0)
+	local light = Instance.new("PointLight")
+	light.Range = 18
+	light.Brightness = 1.2
+	light.Color = Color3.fromHex("#ffd27a")
+	light.Shadows = false
+	light.Parent = bulb
+	return model
+end
+
+function Models.BuildGift(): Model
+	local model, g = newModel("Gift")
+	local purple, gold = st("#8e24aa"), st("#ffd54f", Enum.Material.Metal)
+	box(g, 1.1, 1.0, 1.1, purple, 0, 0.5, 0)
+	box(g, 1.2, 0.2, 1.2, purple, 0, 1.08, 0)
+	box(g, 0.2, 1.22, 1.14, gold, 0, 0.6, 0)
+	box(g, 1.14, 1.22, 0.2, gold, 0, 0.6, 0)
+	for _, s in { -1, 1 } do
+		box(g, 0.06, 0.35, 0.35, gold, s * 0.18, 1.32, 0, 0.785, 0, s * 0.5)
+	end
+	return model
+end
+
+-- Decorated plaza tree.
+function Models.BuildXmasTree(): Model
+	local model = Models.BuildPine(1.5)
+	local g = { model = model, cf = CFrame.new() }
+	local colors = { "#e53935", "#ffd54f", "#42a5f5", "#ab47bc", "#66bb6a" }
+	local rng = Random.new(7)
+	for i = 1, 36 do
+		local y = 1.6 + rng:NextNumber() * 4.4
+		local r = math.max(0.3, (2.5 - (y - 1.5) * 0.5)) * 0.95
+		local a = rng:NextNumber() * math.pi * 2
+		ball(g, 0.13, st(colors[i % #colors + 1], Enum.Material.Neon), math.cos(a) * r, y, math.sin(a) * r)
+	end
+	ball(g, 0.3, st("#ffd54f", Enum.Material.Neon), 0, 7.2, 0)
+	return model
+end
+
+-- Anchor or weld a model for use. When `weldTo` is given, every part is unanchored,
+-- massless and welded to the model's Root.
+function Models.Weld(model: Model)
+	local root = model.PrimaryPart :: BasePart
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Massless = true
+			d.CanCollide = false
+			d.CanQuery = false
+			d.CanTouch = false
+			if d ~= root then
+				local w = Instance.new("WeldConstraint")
+				w.Part0 = root
+				w.Part1 = d
+				w.Parent = d
+			end
+			d.Anchored = false
+		end
+	end
+end
+
+return Models
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="4">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="5">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
+          <string name="Name">DataService</string>
+          <string name="Source"><![CDATA[--!strict
+-- Player save data in a DataStore, with retries, autosave and shutdown saving.
+-- In Studio without "Enable Studio Access to API Services", the game still runs and
+-- simply doesn't save.
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local DataService = {}
+
+export type Data = {
+	coins: number,
+	owned: { string },
+	equipped: string,
+	load: number,
+	pile: number,
+	spins: number,
+	lastFreeSpinDay: number,
+	daily: { lastDay: number, streak: number },
+	boosts: { sell: number, capacity: number },
+	auto: boolean,
+	totalSold: number,
+}
+
+local function defaults(): Data
+	return {
+		coins = 0,
+		owned = { "hands" },
+		equipped = "hands",
+		load = 0,
+		pile = 0,
+		spins = 0,
+		lastFreeSpinDay = -1,
+		daily = { lastDay = -1, streak = 0 },
+		boosts = { sell = 0, capacity = 0 },
+		auto = false,
+		totalSold = 0,
+	}
+end
+
+local store: DataStore? = nil
+local ok, err = pcall(function()
+	store = DataStoreService:GetDataStore("ClearTheSnow_v1")
+end)
+if not ok then
+	warn("[ClearTheSnow] DataStore unavailable, progress will not save:", err)
+end
+
+local sessions: { [Player]: Data } = {}
+local loaded: { [Player]: boolean } = {}
+
+local function key(player: Player): string
+	return "player_" .. player.UserId
+end
+
+local function merge(saved: any): Data
+	local d = defaults()
+	if typeof(saved) ~= "table" then
+		return d
+	end
+	for k, v in saved do
+		if (d :: any)[k] ~= nil and typeof(v) == typeof((d :: any)[k]) then
+			(d :: any)[k] = v
+		end
+	end
+	d.daily = {
+		lastDay = if typeof(saved.daily) == "table" and typeof(saved.daily.lastDay) == "number" then saved.daily.lastDay else -1,
+		streak = if typeof(saved.daily) == "table" and typeof(saved.daily.streak) == "number" then saved.daily.streak else 0,
+	}
+	d.boosts = {
+		sell = if typeof(saved.boosts) == "table" and typeof(saved.boosts.sell) == "number" then saved.boosts.sell else 0,
+		capacity = if typeof(saved.boosts) == "table" and typeof(saved.boosts.capacity) == "number" then saved.boosts.capacity else 0,
+	}
+	if not table.find(d.owned, "hands") then
+		table.insert(d.owned, 1, "hands")
+	end
+	return d
+end
+
+function DataService.Load(player: Player): Data
+	local data: Data? = nil
+	if store then
+		for attempt = 1, 3 do
+			local success, result = pcall(function()
+				return (store :: DataStore):GetAsync(key(player))
+			end)
+			if success then
+				data = merge(result)
+				loaded[player] = true
+				break
+			end
+			warn("[ClearTheSnow] load failed (attempt " .. attempt .. "):", result)
+			task.wait(1.5 * attempt)
+		end
+	end
+	local d = data or defaults()
+	sessions[player] = d
+	return d
+end
+
+function DataService.Get(player: Player): Data?
+	return sessions[player]
+end
+
+function DataService.Save(player: Player)
+	local d = sessions[player]
+	-- only write if the load succeeded, so a failed load never wipes real progress
+	if not d or not store or not loaded[player] then
+		return
+	end
+	for attempt = 1, 3 do
+		local success, e = pcall(function()
+			(store :: DataStore):SetAsync(key(player), d)
+		end)
+		if success then
+			return
+		end
+		warn("[ClearTheSnow] save failed (attempt " .. attempt .. "):", e)
+		task.wait(1.5 * attempt)
+	end
+end
+
+function DataService.Release(player: Player)
+	DataService.Save(player)
+	sessions[player] = nil
+	loaded[player] = nil
+end
+
+-- autosave
+task.spawn(function()
+	while true do
+		task.wait(90)
+		for _, player in Players:GetPlayers() do
+			task.spawn(DataService.Save, player)
+		end
+	end
+end)
+
+game:BindToClose(function()
+	if RunService:IsStudio() and not store then
+		return
+	end
+	local pending = 0
+	for _, player in Players:GetPlayers() do
+		pending += 1
+		task.spawn(function()
+			DataService.Save(player)
+			pending -= 1
+		end)
+	end
+	local t = os.clock()
+	while pending > 0 and os.clock() - t < 25 do
+		task.wait(0.2)
+	end
+end)
+
+return DataService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="7">
+        <Properties>
+          <string name="Name">Main</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Clear the Snow: server entry point.
+-- Builds the town, runs the snow harvesting loop, handles selling, buying,
+-- equipping, daily rewards and the spin wheel, and keeps player attributes in sync
+-- for the client UI.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local World = require(script.Parent.World)
+local SnowService = require(script.Parent.SnowService)
+local DataService = require(script.Parent.DataService)
+
+local H = Config.Hub
+
+-- ------------------------------------------------------------------ remotes
+local remotes = Instance.new("Folder")
+remotes.Name = "Remotes"
+local function remoteEvent(name: string): RemoteEvent
+	local r = Instance.new("RemoteEvent")
+	r.Name = name
+	r.Parent = remotes
+	return r
+end
+local function remoteFunction(name: string): RemoteFunction
+	local r = Instance.new("RemoteFunction")
+	r.Name = name
+	r.Parent = remotes
+	return r
+end
+local SetScooping = remoteEvent("SetScooping")
+local SetAuto = remoteEvent("SetAuto")
+local Notify = remoteEvent("Notify")
+local BuyTool = remoteFunction("BuyTool")
+local EquipTool = remoteFunction("EquipTool")
+local ClaimDaily = remoteFunction("ClaimDaily")
+local Spin = remoteFunction("Spin")
+local SellPile = remoteFunction("SellPile")
+remotes.Parent = ReplicatedStorage
+
+-- ------------------------------------------------------------------ world
+local blocks, hub = World.Build()
+SnowService.Init(blocks)
+
+-- ------------------------------------------------------------------ helpers
+local function today(): number
+	return math.floor(os.time() / 86400)
+end
+
+local function owns(d, id: string): boolean
+	return table.find(d.owned, id) ~= nil
+end
+
+local function nextTool(d)
+	for _, t in Config.Tools do
+		if not owns(d, t.id) then
+			return t
+		end
+	end
+	return nil
+end
+
+-- progress-scaled coin unit used by daily rewards and the wheel
+local function progressCoins(d): number
+	local n = nextTool(d)
+	return if n then n.price else Config.Tools[#Config.Tools].price * 1.5
+end
+
+local function boostActive(d, name: string): boolean
+	return (d.boosts[name] or 0) > os.time()
+end
+
+local function capacity(d): number
+	return Config.GetTool(d.equipped).capacity * (if boostActive(d, "capacity") then 2 else 1)
+end
+
+local function dailyStatus(d)
+	local t = today()
+	local canClaim = d.daily.lastDay < t
+	local continuing = d.daily.lastDay == t - 1
+	local nextStreak = if canClaim then (if continuing then d.daily.streak + 1 else 1) else d.daily.streak
+	local idx = (math.max(1, nextStreak) - 1) % #Config.DailyRewards + 1
+	return canClaim, idx, nextStreak
+end
+
+local function dailyReward(d, idx: number)
+	local r = Config.DailyRewards[idx]
+	return math.max(r.min, math.floor(progressCoins(d) * r.pct + 0.5)), r.spins
+end
+
+local function freeSpinAvailable(d): boolean
+	return d.lastFreeSpinDay < today()
+end
+
+local function wheelCoins(d, seg): number
+	return math.max(10, math.floor(progressCoins(d) * 0.1 + 0.5)) * seg.mult
+end
+
+-- ------------------------------------------------------------------ per-player runtime
+type Runtime = {
+	scooping: boolean,
+	visual: Model?,
+	weld: Weld?,
+	loadPart: BasePart?,
+	loadFull: number,
+	front: number,
+	tilt: number,
+	dig: number,
+	swing: number,
+	sitTrack: AnimationTrack?,
+	origHip: number?,
+	lastPublish: number,
+	fullWarned: boolean,
+	busy: boolean,
+}
+local runtime: { [Player]: Runtime } = {}
+
+local function publish(player: Player)
+	local d = DataService.Get(player)
+	if not d then
+		return
+	end
+	local canClaim, idx, streak = dailyStatus(d)
+	player:SetAttribute("Coins", math.floor(d.coins))
+	player:SetAttribute("Load", math.floor(d.load + 1e-6))
+	player:SetAttribute("Capacity", capacity(d))
+	player:SetAttribute("Pile", math.floor(d.pile))
+	player:SetAttribute("Equipped", d.equipped)
+	player:SetAttribute("Owned", table.concat(d.owned, ","))
+	player:SetAttribute("Spins", d.spins + (if freeSpinAvailable(d) then 1 else 0))
+	player:SetAttribute("FreeSpin", freeSpinAvailable(d))
+	player:SetAttribute("DailyCanClaim", canClaim)
+	player:SetAttribute("DailyIndex", idx)
+	player:SetAttribute("DailyStreak", if canClaim then streak - 1 else streak)
+	player:SetAttribute("DailyBroken", canClaim and d.daily.lastDay >= 0 and d.daily.lastDay < today() - 1 and d.daily.streak > 0)
+	player:SetAttribute("ProgressCoins", progressCoins(d))
+	player:SetAttribute("BoostSell", d.boosts.sell or 0)
+	player:SetAttribute("BoostCapacity", d.boosts.capacity or 0)
+	player:SetAttribute("Auto", d.auto)
+	local ls = player:FindFirstChild("leaderstats")
+	if ls then
+		ls.Coins.Value = math.floor(d.coins)
+		ls.Sold.Value = math.floor(d.totalSold)
+	end
+end
+
+-- ------------------------------------------------------------------ equipping visuals
+local SIT_R15 = "rbxassetid://2506281703"
+local SIT_R6 = "rbxassetid://178130996"
+
+local function clearVisual(player: Player, r: Runtime)
+	if r.sitTrack then
+		r.sitTrack:Stop(0.2)
+		r.sitTrack = nil
+	end
+	if r.visual then
+		r.visual:Destroy()
+		r.visual = nil
+	end
+	r.weld = nil
+	r.loadPart = nil
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and r.origHip then
+		hum.HipHeight = r.origHip
+	end
+end
+
+local function attachVisual(player: Player)
+	local r = runtime[player]
+	local d = DataService.Get(player)
+	if not r or not d then
+		return
+	end
+	clearVisual(player, r)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not (char and hum and hrp) or hum.Health <= 0 then
+		return
+	end
+	if not r.origHip then
+		r.origHip = hum.HipHeight
+	end
+	local isR15 = hum.RigType == Enum.HumanoidRigType.R15
+	local groundToHrp = (r.origHip :: number) + hrp.Size.Y / 2 + (if isR15 then 0 else 2)
+	local tool = Config.GetTool(d.equipped)
+	hum.WalkSpeed = tool.speed
+
+	local model = Models.Build(tool.id)
+	local minZ = math.huge
+	local minY = math.huge
+	for _, p in model:GetDescendants() do
+		if p:IsA("BasePart") and p.Name ~= "Root" then
+			minZ = math.min(minZ, p.Position.Z - p.Size.Z / 2)
+			minY = math.min(minY, p.Position.Y - p.Size.Y / 2)
+		end
+	end
+	local loadPart = model:FindFirstChild("Load", true) :: BasePart?
+	Models.Weld(model)
+	model.Name = "EquippedTool"
+
+	local weld = Instance.new("Weld")
+	if tool.kind == "hand" then
+		local hand = (char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")) :: BasePart?
+		if not hand then
+			model:Destroy()
+			return
+		end
+		local grip = hand:FindFirstChild("RightGripAttachment") :: Attachment?
+		local gripPos = if grip then grip.Position else Vector3.new(0, -hand.Size.Y / 2, 0)
+		local len = -minY -- blade length below the grip, in studs
+		local gripHeight = 2.4
+		r.tilt = if len > gripHeight - 0.3 then math.acos(math.clamp((gripHeight - 0.35) / len, -1, 0.99)) else 0.3
+		r.front = 1.5 + tool.radius * 0.6
+		weld.Part0 = hand
+		weld.C0 = CFrame.new(gripPos) * CFrame.Angles(r.tilt, 0, 0)
+	else
+		local seat = model:GetAttribute("SeatOffset") :: Vector3
+		local standing = model:GetAttribute("Standing") == true
+		local hrpHeight = groundToHrp
+		if not standing then
+			hrpHeight = seat.Y + 0.6
+			hum.HipHeight = (r.origHip :: number) + (hrpHeight - groundToHrp)
+			local anim = Instance.new("Animation")
+			anim.AnimationId = if isR15 then SIT_R15 else SIT_R6
+			local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+			local ok, track = pcall(function()
+				return animator:LoadAnimation(anim)
+			end)
+			if ok and track then
+				track.Priority = Enum.AnimationPriority.Action
+				track.Looped = true
+				track:Play(0.2)
+				r.sitTrack = track
+			end
+		end
+		weld.Part0 = hrp
+		weld.C0 = CFrame.new(-seat.X, -hrpHeight, -seat.Z)
+		r.front = math.max(2, seat.Z - minZ - tool.radius * 0.5)
+	end
+	weld.Part1 = model.PrimaryPart
+	weld.Parent = model.PrimaryPart
+	model.Parent = char
+	r.visual = model
+	r.weld = weld
+	r.loadPart = loadPart
+	r.loadFull = if loadPart then (loadPart:GetAttribute("FullHeight") or loadPart.Size.Y) else 1
+	r.dig = 0
+	r.swing = -1
+end
+
+local function updateLoadVisual(r: Runtime, fill: number)
+	local p = r.loadPart
+	if not p or not p.Parent then
+		return
+	end
+	if fill < 0.02 then
+		p.Transparency = 1
+	else
+		p.Transparency = 0
+		local s = p.Size
+		local y = math.max(0.05, r.loadFull * fill)
+		if math.abs(s.Y - y) > 0.03 then
+			p.Size = Vector3.new(s.X, y, s.Z)
+		end
+	end
+end
+
+local function equip(player: Player, id: string)
+	local d = DataService.Get(player)
+	if not d or not owns(d, id) then
+		return false
+	end
+	d.equipped = id
+	d.load = math.min(d.load, capacity(d))
+	attachVisual(player)
+	publish(player)
+	return true
+end
+
+-- ------------------------------------------------------------------ actions
+local function sell(player: Player)
+	local d = DataService.Get(player)
+	if not d then
+		return 0
+	end
+	if d.pile < 1 then
+		Notify:FireClient(player, "toast", if d.load > 0 then "Toss your snow on the Snow Pile first!" else "Your pile is empty. Go clear some snow!")
+		return 0
+	end
+	local units = math.floor(d.pile)
+	local coins = units * Config.SNOW_VALUE * (if boostActive(d, "sell") then 2 else 1)
+	d.coins += coins
+	d.totalSold += units
+	d.pile -= units
+	publish(player)
+	Notify:FireClient(player, "sold", coins)
+	return coins
+end
+
+local function openFor(player: Player, panel: string, focus: string?)
+	Notify:FireClient(player, "open", panel, focus)
+end
+
+hub.SellPrompt.Triggered:Connect(sell)
+hub.ShopPrompt.Triggered:Connect(function(player)
+	openFor(player, "shop")
+end)
+for _, disp in hub.Displays do
+	disp.prompt.Triggered:Connect(function(player)
+		openFor(player, "shop", disp.id)
+	end)
+	disp.click.MouseClick:Connect(function(player)
+		openFor(player, "shop", disp.id)
+	end)
+end
+hub.WheelPrompt.Triggered:Connect(function(player)
+	openFor(player, "spin")
+end)
+hub.WheelClick.MouseClick:Connect(function(player)
+	openFor(player, "spin")
+end)
+hub.GiftPrompt.Triggered:Connect(function(player)
+	openFor(player, "daily")
+end)
+hub.GiftClick.MouseClick:Connect(function(player)
+	openFor(player, "daily")
+end)
+
+SellPile.OnServerInvoke = function(player)
+	-- selling from the UI only works while standing at the buyer
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp or (hrp.Position - (H.Sell + Vector3.new(0, 0, 5))).Magnitude > 18 then
+		return 0
+	end
+	return sell(player)
+end
+
+SetScooping.OnServerEvent:Connect(function(player, on)
+	local r = runtime[player]
+	if r then
+		r.scooping = on == true
+	end
+end)
+
+SetAuto.OnServerEvent:Connect(function(player, on)
+	local d = DataService.Get(player)
+	if d then
+		d.auto = on == true
+		publish(player)
+	end
+end)
+
+BuyTool.OnServerInvoke = function(player, id)
+	local d = DataService.Get(player)
+	local r = runtime[player]
+	if not d or not r or typeof(id) ~= "string" or r.busy then
+		return false, "Try again."
+	end
+	local i = Config.ToolIndex[id]
+	if not i then
+		return false, "Unknown tool."
+	end
+	local tool = Config.Tools[i]
+	if owns(d, id) then
+		equip(player, id)
+		return true, "Equipped " .. tool.name
+	end
+	if i > 1 and not owns(d, Config.Tools[i - 1].id) then
+		return false, "Buy the " .. Config.Tools[i - 1].name .. " first."
+	end
+	if d.coins < tool.price then
+		return false, "You need " .. Config.FormatNumber(tool.price - d.coins) .. " more coins."
+	end
+	r.busy = true
+	d.coins -= tool.price
+	table.insert(d.owned, id)
+	equip(player, id)
+	r.busy = false
+	task.spawn(DataService.Save, player)
+	return true, "You got the " .. tool.name .. "!"
+end
+
+EquipTool.OnServerInvoke = function(player, id)
+	if typeof(id) ~= "string" then
+		return false
+	end
+	return equip(player, id)
+end
+
+ClaimDaily.OnServerInvoke = function(player)
+	local d = DataService.Get(player)
+	if not d then
+		return nil
+	end
+	local canClaim, idx, streak = dailyStatus(d)
+	if not canClaim then
+		return nil
+	end
+	local coins, spins = dailyReward(d, idx)
+	d.daily = { lastDay = today(), streak = streak }
+	d.coins += coins
+	d.spins += spins
+	publish(player)
+	task.spawn(DataService.Save, player)
+	return { coins = coins, spins = spins, day = idx }
+end
+
+Spin.OnServerInvoke = function(player)
+	local d = DataService.Get(player)
+	local r = runtime[player]
+	if not d or not r or r.busy then
+		return nil
+	end
+	if freeSpinAvailable(d) then
+		d.lastFreeSpinDay = today()
+	elseif d.spins > 0 then
+		d.spins -= 1
+	else
+		return nil
+	end
+	local total = 0
+	for _, s in Config.Wheel do
+		total += s.weight
+	end
+	local roll = math.random() * total
+	local index = 1
+	for i, s in Config.Wheel do
+		roll -= s.weight
+		if roll <= 0 then
+			index = i
+			break
+		end
+	end
+	local seg = Config.Wheel[index]
+	local msg
+	if seg.kind == "coins" then
+		local c = wheelCoins(d, seg)
+		d.coins += c
+		msg = "+" .. Config.FormatNumber(c) .. " coins!"
+	elseif seg.kind == "spin" then
+		d.spins += 1
+		msg = "+1 bonus spin!"
+	else
+		local now = os.time()
+		d.boosts[seg.boost] = math.max(now, d.boosts[seg.boost] or 0) + seg.mins * 60
+		msg = (if seg.boost == "sell" then "2x sell price" else "2x carry capacity") .. " for " .. seg.mins .. " minutes!"
+	end
+	publish(player)
+	task.spawn(DataService.Save, player)
+	return { index = index, message = msg }
+end
+
+-- ------------------------------------------------------------------ players
+local function onCharacter(player: Player, char: Model)
+	local hum = char:WaitForChild("Humanoid", 10) :: Humanoid?
+	char:WaitForChild("HumanoidRootPart", 10)
+	if not hum then
+		return
+	end
+	local r = runtime[player]
+	if r then
+		r.origHip = hum.HipHeight
+		r.visual = nil
+		r.sitTrack = nil
+	end
+	task.wait(0.2)
+	attachVisual(player)
+end
+
+local function onPlayer(player: Player)
+	runtime[player] = {
+		scooping = false,
+		loadFull = 1,
+		front = 2,
+		tilt = 0,
+		dig = 0,
+		swing = -1,
+		lastPublish = 0,
+		fullWarned = false,
+		busy = false,
+	}
+	local ls = Instance.new("Folder")
+	ls.Name = "leaderstats"
+	local coins = Instance.new("IntValue")
+	coins.Name = "Coins"
+	coins.Parent = ls
+	local sold = Instance.new("IntValue")
+	sold.Name = "Sold"
+	sold.Parent = ls
+	ls.Parent = player
+
+	local d = DataService.Load(player)
+	if not player.Parent then
+		DataService.Release(player)
+		return
+	end
+	if not owns(d, d.equipped) then
+		d.equipped = "hands"
+	end
+	publish(player)
+	player:SetAttribute("Ready", true)
+	player.CharacterAdded:Connect(function(char)
+		onCharacter(player, char)
+	end)
+	if player.Character then
+		task.spawn(onCharacter, player, player.Character)
+	end
+end
+
+Players.PlayerAdded:Connect(onPlayer)
+for _, p in Players:GetPlayers() do
+	task.spawn(onPlayer, p)
+end
+Players.PlayerRemoving:Connect(function(player)
+	runtime[player] = nil
+	DataService.Release(player)
+end)
+
+-- ------------------------------------------------------------------ main loop
+local pileFlat = Vector3.new(H.Pile.X, 0, H.Pile.Z)
+RunService.Heartbeat:Connect(function(dt)
+	local now = os.clock()
+	for player, r in runtime do
+		local d = DataService.Get(player)
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not (d and hum and hrp) or hum.Health <= 0 then
+			continue
+		end
+		local tool = Config.GetTool(d.equipped)
+		local cap = capacity(d)
+		local moving = hum.MoveDirection.Magnitude > 0.1
+		local wants = r.scooping or d.auto or (tool.kind == "machine" and moving)
+		local working = false
+		if wants and d.load < cap - 1e-6 then
+			local look = hrp.CFrame.LookVector
+			local flat = Vector3.new(look.X, 0, look.Z)
+			flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
+			local pos = hrp.Position + flat * r.front
+			local got = SnowService.Harvest(pos.X, pos.Z, tool.radius, math.min(tool.rate * dt, cap - d.load))
+			if got > 0 then
+				d.load = math.min(cap, d.load + got)
+				working = true
+			end
+		end
+		if d.load >= cap - 1e-6 then
+			if wants and not r.fullWarned then
+				r.fullWarned = true
+				Notify:FireClient(player, "full")
+			end
+		else
+			r.fullWarned = false
+		end
+
+		-- digging motion for hand tools
+		if tool.kind == "hand" and r.weld and r.weld.Part0 then
+			r.dig = if working then r.dig + dt * 9 else 0
+			local swing = if working then (math.sin(r.dig) * 0.5 + 0.5) * 0.5 else 0
+			if math.abs(swing - r.swing) > 0.02 then
+				r.swing = swing
+				r.weld.C0 = CFrame.new(r.weld.C0.Position) * CFrame.Angles(r.tilt + swing, 0, 0)
+			end
+		end
+
+		-- toss into the pile
+		local flatPos = Vector3.new(hrp.Position.X, 0, hrp.Position.Z)
+		local reach = H.PileRadius + 7 + (if tool.kind == "machine" then r.front * 0.6 else 0)
+		if d.load >= 1 and (flatPos - pileFlat).Magnitude < reach then
+			local units = math.floor(d.load + 1e-6)
+			d.pile += units
+			d.load -= units
+			Notify:FireClient(player, "dumped", units)
+			publish(player)
+		end
+
+		updateLoadVisual(r, d.load / cap)
+		if now - r.lastPublish > 0.15 then
+			r.lastPublish = now
+			publish(player)
+		end
+	end
+end)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
+          <string name="Name">SnowService</string>
+          <string name="Source"><![CDATA[--!strict
+-- Harvestable snow that grows back. The town is split into square tiles; each tile
+-- holds 0..TILE_MAX_UNITS units of snow and is drawn as one Snow-material part whose
+-- height follows the amount of snow on it.
+
+local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Config"))
+
+local SnowService = {}
+
+local SIZE = Config.WORLD_SIZE
+local TILE = Config.TILE
+local N = math.floor(SIZE / TILE)
+local MAX = Config.TILE_MAX_UNITS
+local UH = Config.UNIT_HEIGHT
+local REGROW_RATE = MAX / Config.REGROW_SECONDS
+
+local units: { number } = table.create(N * N, MAX)
+local blocked: { boolean } = table.create(N * N, false)
+local cooldown: { number } = table.create(N * N, 0)
+local parts: { [number]: BasePart } = {}
+local dirty: { [number]: boolean } = {}
+local folder: Folder
+
+local function idx(i: number, j: number): number
+	return j * N + i + 1
+end
+local function tileOf(x: number, z: number): (number, number)
+	return math.floor((x + SIZE / 2) / TILE), math.floor((z + SIZE / 2) / TILE)
+end
+local function centre(i: number, j: number): (number, number)
+	return -SIZE / 2 + (i + 0.5) * TILE, -SIZE / 2 + (j + 0.5) * TILE
+end
+
+local snowColors = {
+	Color3.fromRGB(244, 248, 255),
+	Color3.fromRGB(238, 244, 253),
+	Color3.fromRGB(248, 250, 255),
+}
+
+local function draw(k: number)
+	local p = parts[k]
+	if not p then
+		return
+	end
+	local u = units[k]
+	local h = u * UH
+	if u < 0.15 then
+		p.Transparency = 1
+		h = 0.05
+	else
+		p.Transparency = 0
+	end
+	local j = (k - 1) // N
+	local i = (k - 1) % N
+	local x, z = centre(i, j)
+	p.Size = Vector3.new(TILE, h + 0.2, TILE)
+	p.CFrame = CFrame.new(x, h / 2 + 0.1, z)
+end
+
+-- rects: list of { x0, z0, x1, z1 } in studs where snow never grows
+function SnowService.Init(rects: { { number } })
+	for _, r in rects do
+		local i0, j0 = tileOf(math.min(r[1], r[3]), math.min(r[2], r[4]))
+		local i1, j1 = tileOf(math.max(r[1], r[3]) - 0.01, math.max(r[2], r[4]) - 0.01)
+		for j = math.max(0, j0), math.min(N - 1, j1) do
+			for i = math.max(0, i0), math.min(N - 1, i1) do
+				local k = idx(i, j)
+				blocked[k] = true
+				units[k] = 0
+			end
+		end
+	end
+	folder = Instance.new("Folder")
+	folder.Name = "Snow"
+	local rng = Random.new(42)
+	for j = 0, N - 1 do
+		for i = 0, N - 1 do
+			local k = idx(i, j)
+			if not blocked[k] then
+				local p = Instance.new("Part")
+				p.Name = "SnowTile"
+				p.Anchored = true
+				p.CanCollide = false
+				p.CanTouch = false
+				p.CanQuery = false
+				p.CastShadow = false
+				p.Material = Enum.Material.Snow
+				p.Color = snowColors[rng:NextInteger(1, #snowColors)]
+				p.TopSurface = Enum.SurfaceType.Smooth
+				p.BottomSurface = Enum.SurfaceType.Smooth
+				parts[k] = p
+				draw(k)
+				p.Parent = folder
+			end
+		end
+	end
+	folder.Parent = workspace
+
+	-- regrowth
+	task.spawn(function()
+		local step = 1
+		while true do
+			task.wait(step)
+			for k = 1, N * N do
+				if not blocked[k] and units[k] < MAX then
+					if cooldown[k] > 0 then
+						cooldown[k] -= step
+					else
+						units[k] = math.min(MAX, units[k] + REGROW_RATE * step * (0.6 + math.random() * 0.8))
+						dirty[k] = true
+					end
+				end
+			end
+		end
+	end)
+	-- redraw changed tiles a few times per second
+	task.spawn(function()
+		while true do
+			task.wait(0.1)
+			for k in dirty do
+				draw(k)
+			end
+			table.clear(dirty)
+		end
+	end)
+end
+
+-- Remove up to `amount` units from the tiles inside a circle. Returns units removed.
+function SnowService.Harvest(x: number, z: number, radius: number, amount: number): number
+	if amount <= 0 then
+		return 0
+	end
+	local r = math.max(radius, TILE * 0.5)
+	local i0, j0 = tileOf(x - r, z - r)
+	local i1, j1 = tileOf(x + r, z + r)
+	local list = {}
+	local avail = 0
+	local reach = (r + TILE * 0.5) ^ 2
+	for j = math.max(0, j0), math.min(N - 1, j1) do
+		for i = math.max(0, i0), math.min(N - 1, i1) do
+			local k = idx(i, j)
+			if not blocked[k] and units[k] > 0.001 then
+				local cx, cz = centre(i, j)
+				if (cx - x) ^ 2 + (cz - z) ^ 2 <= reach then
+					table.insert(list, k)
+					avail += units[k]
+				end
+			end
+		end
+	end
+	if avail <= 0 then
+		return 0
+	end
+	local take = math.min(amount, avail)
+	local f = take / avail
+	for _, k in list do
+		units[k] -= units[k] * f
+		if units[k] < 0.05 then
+			units[k] = 0
+		end
+		cooldown[k] = Config.REGROW_DELAY[1] + math.random() * (Config.REGROW_DELAY[2] - Config.REGROW_DELAY[1])
+		dirty[k] = true
+	end
+	return take
+end
+
+function SnowService.DepthAt(x: number, z: number): number
+	local i, j = tileOf(x, z)
+	if i < 0 or j < 0 or i >= N or j >= N then
+		return 0
+	end
+	return units[idx(i, j)] * UH
+end
+
+return SnowService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">World</string>
+          <string name="Source"><![CDATA[--!nonstrict
+-- Builds the neighbourhood (ground, roads, houses, trees, lamps, fence) and the
+-- market hub (snow pile, Snow Buyer, Tool Shop, tool display, spin wheel, daily gift).
+-- Returns rectangles where snow must not grow and handles to the interactive bits.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local CollectionService = game:GetService("CollectionService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+
+local S = Config.STUDS_PER_METER
+local HALF = Config.WORLD_SIZE / 2
+local FACE_PLAZA = CFrame.Angles(0, math.pi, 0) -- models face -Z; this turns them to +Z
+
+local World = {}
+
+local function part(parent: Instance, size: Vector3, cf: CFrame, color: string, material: Enum.Material?, props: { [string]: any }?): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.Size = size
+	p.CFrame = cf
+	p.Color = Color3.fromHex(color)
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	if props then
+		for k, val in props do
+			(p :: any)[k] = val
+		end
+	end
+	p.Parent = parent
+	return p
+end
+
+local function rectOverlap(a, b, margin: number): boolean
+	return a[3] > b[1] - margin and a[1] < b[3] + margin and a[4] > b[2] - margin and a[2] < b[4] + margin
+end
+
+-- [x0, z0, x1, z1] in studs
+World.Roads = {
+	{ -HALF, 13 * S, HALF, 20 * S },
+	{ -HALF, -36 * S, HALF, -29 * S },
+	{ -36 * S, -HALF, -29 * S, HALF },
+	{ 29 * S, -HALF, 36 * S, HALF },
+}
+World.Plaza = { -14 * S, -11 * S, 14 * S, 6 * S }
+
+function World.SetupLighting()
+	Lighting.ClockTime = 14.5
+	Lighting.Brightness = 2.2
+	Lighting.Ambient = Color3.fromRGB(120, 130, 150)
+	Lighting.OutdoorAmbient = Color3.fromRGB(170, 185, 210)
+	Lighting.EnvironmentDiffuseScale = 0.6
+	Lighting.EnvironmentSpecularScale = 0.6
+	Lighting.GlobalShadows = true
+	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+	atmo.Density = 0.32
+	atmo.Offset = 0.1
+	atmo.Color = Color3.fromRGB(205, 220, 240)
+	atmo.Decay = Color3.fromRGB(150, 175, 210)
+	atmo.Glare = 0
+	atmo.Haze = 1.6
+	atmo.Parent = Lighting
+	local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect") or Instance.new("ColorCorrectionEffect")
+	cc.Saturation = 0.08
+	cc.TintColor = Color3.fromRGB(245, 250, 255)
+	cc.Parent = Lighting
+end
+
+function World.Build()
+	World.SetupLighting()
+	local root = Instance.new("Folder")
+	root.Name = "Town"
+	root.Parent = workspace
+	local blocks = {} -- areas without snow
+
+	-- remove the default baseplate if there is one
+	local bp = workspace:FindFirstChild("Baseplate")
+	if bp then
+		bp:Destroy()
+	end
+
+	-- ground, outer snowfield, roads and plaza
+	part(root, Vector3.new(Config.WORLD_SIZE, 2, Config.WORLD_SIZE), CFrame.new(0, -1, 0), "#6b7d55", Enum.Material.Grass, { Name = "Ground" })
+	part(root, Vector3.new(2000, 2, 2000), CFrame.new(0, -1.05, 0), "#e9f0fa", Enum.Material.Snow, { Name = "OuterSnow" })
+	for i, r in World.Roads do
+		local cx, cz = (r[1] + r[3]) / 2, (r[2] + r[4]) / 2
+		part(root, Vector3.new(r[3] - r[1], 0.2, r[4] - r[2]), CFrame.new(cx, 0.0, cz), "#4a4d52", Enum.Material.Asphalt, { Name = "Road" .. i })
+	end
+	local P = World.Plaza
+	part(root, Vector3.new(P[3] - P[1], 0.3, P[4] - P[2]), CFrame.new((P[1] + P[3]) / 2, 0.05, (P[2] + P[4]) / 2), "#9c8f80", Enum.Material.Cobblestone, { Name = "Plaza" })
+	table.insert(blocks, P)
+
+	-- houses
+	local rng = Random.new(1337)
+	local houseColors = { "#c0504d", "#4f81bd", "#9bbb59", "#f2c14e", "#8064a2", "#e98b5a", "#5fb3b3", "#d7d2c8", "#a9746e" }
+	local houses = {}
+	local houseFolder = Instance.new("Folder")
+	houseFolder.Name = "Houses"
+	houseFolder.Parent = root
+	local colliders = {}
+	local function tryHouse(cxM: number, czM: number, facing: number)
+		local wM, dM = 7 + rng:NextNumber() * 2, 6 + rng:NextNumber() * 1.5
+		local side = math.abs(math.sin(facing)) > 0.5
+		local fw, fd = (if side then dM else wM) * S, (if side then wM else dM) * S
+		local cx, cz = cxM * S, czM * S
+		local rect = { cx - fw / 2, cz - fd / 2, cx + fw / 2, cz + fd / 2 }
+		if math.abs(cx) > HALF - 18 or math.abs(cz) > HALF - 18 then
+			return
+		end
+		for _, r in World.Roads do
+			if rectOverlap(rect, r, 3) then
+				return
+			end
+		end
+		if rectOverlap(rect, P, 18) then
+			return
+		end
+		for _, h in houses do
+			if rectOverlap(rect, h, 9) then
+				return
+			end
+		end
+		table.insert(houses, rect)
+		table.insert(blocks, rect)
+		local house = Models.BuildHouse(wM, dM, houseColors[rng:NextInteger(1, #houseColors)], rng:NextNumber() > 0.4)
+		-- built facing -Z; `facing` is the direction the front door should point (radians about Y from +Z)
+		house:PivotTo(CFrame.new(cx, 0, cz) * CFrame.Angles(0, facing + math.pi, 0))
+		for _, d in house:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.CanCollide = d.Name ~= "Root"
+				d.CanQuery = true
+			end
+		end
+		house.Parent = houseFolder
+	end
+	for x = -54, 54, 11 do
+		tryHouse(x, 26, math.pi)
+		tryHouse(x, 6, 0)
+		tryHouse(x, -42, 0)
+		tryHouse(x, -22, math.pi)
+		tryHouse(x, 46, math.pi)
+	end
+	for z = -54, 54, 11 do
+		tryHouse(-46, z, math.pi / 2)
+		tryHouse(-19, z, -math.pi / 2)
+		tryHouse(46, z, -math.pi / 2)
+		tryHouse(19, z, math.pi / 2)
+	end
+
+	-- pine trees
+	local trees = Instance.new("Folder")
+	trees.Name = "Trees"
+	trees.Parent = root
+	local spots = {}
+	for _ = 1, 160 do
+		if #spots >= 70 then
+			break
+		end
+		local x = (rng:NextNumber() - 0.5) * (Config.WORLD_SIZE - 20)
+		local z = (rng:NextNumber() - 0.5) * (Config.WORLD_SIZE - 20)
+		local rect = { x - 3, z - 3, x + 3, z + 3 }
+		local ok = not rectOverlap(rect, P, 12)
+		for _, r in World.Roads do
+			ok = ok and not rectOverlap(rect, r, 1)
+		end
+		for _, h in houses do
+			ok = ok and not rectOverlap(rect, h, 4)
+		end
+		for _, s in spots do
+			ok = ok and (s[1] - x) ^ 2 + (s[2] - z) ^ 2 > 15 * 15
+		end
+		if ok then
+			table.insert(spots, { x, z })
+			local t = Models.BuildPine(0.8 + rng:NextNumber() * 0.7)
+			t:PivotTo(CFrame.new(x, 0, z) * CFrame.Angles(0, rng:NextNumber() * 6, 0))
+			local trunk = part(t, Vector3.new(2, 8, 2), CFrame.new(x, 4, z), "#000000", nil, { Transparency = 1, CanCollide = true, Name = "Collider" })
+			trunk.CanQuery = false
+			t.Parent = trees
+		end
+	end
+
+	-- street lamps
+	for xM = -50, 50, 16 do
+		for _, zM in { 12, 21, -28, -37 } do
+			local lamp = Models.BuildLamp()
+			lamp:PivotTo(CFrame.new(xM * S, 0, zM * S))
+			part(lamp, Vector3.new(1, 12, 1), CFrame.new(xM * S, 6, zM * S), "#000000", nil, { Transparency = 1, CanCollide = true, Name = "Collider" })
+			lamp.Parent = root
+		end
+	end
+
+	-- perimeter fence (also stops players wandering off)
+	for _, sgn in { -1, 1 } do
+		for _, horiz in { true, false } do
+			for t = -HALF, HALF, 9 do
+				local x, z = if horiz then t else sgn * HALF, if horiz then sgn * HALF else t
+				local post = part(root, Vector3.new(1.2, 0.5, 0.5), CFrame.new(x, 1.9, z) * CFrame.Angles(0, 0, math.pi / 2), "#7b5a3a", Enum.Material.Wood)
+				post.Shape = Enum.PartType.Cylinder
+				post.Size = Vector3.new(3.9, 0.5, 0.5)
+			end
+			for _, y in { 1.35, 2.85 } do
+				local size = if horiz then Vector3.new(Config.WORLD_SIZE, 0.3, 0.2) else Vector3.new(0.2, 0.3, Config.WORLD_SIZE)
+				part(root, size, CFrame.new(if horiz then 0 else sgn * HALF, y, if horiz then sgn * HALF else 0), "#7b5a3a", Enum.Material.Wood)
+			end
+			-- invisible wall
+			local wall = if horiz then Vector3.new(Config.WORLD_SIZE, 30, 1) else Vector3.new(1, 30, Config.WORLD_SIZE)
+			part(root, wall, CFrame.new(if horiz then 0 else sgn * HALF, 15, if horiz then sgn * HALF else 0), "#000000", nil, { Transparency = 1, Name = "Boundary" })
+		end
+	end
+
+	-- distant forest ring
+	for i = 0, 23 do
+		local a = i / 24 * math.pi * 2
+		for k = 0, 2 do
+			local r = HALF + 25 + k * 20 + rng:NextNumber() * 10
+			local b = a + (rng:NextNumber() - 0.5) * 0.2
+			local t = Models.BuildPine(2 + rng:NextNumber() * 1.5)
+			t:PivotTo(CFrame.new(math.cos(b) * r, 0, math.sin(b) * r))
+			t.Parent = trees
+		end
+	end
+
+	-- spawn
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Anchored = true
+	spawn.Size = Vector3.new(8, 0.4, 8)
+	spawn.CFrame = CFrame.new(Config.Hub.Spawn + Vector3.new(0, 0.3, 0))
+	spawn.Material = Enum.Material.Cobblestone
+	spawn.Color = Color3.fromHex("#9c8f80")
+	spawn.Transparency = 0
+	spawn.Duration = 0
+	spawn.Parent = root
+
+	local hub = World.BuildHub(root)
+	return blocks, hub
+end
+
+-- ------------------------------------------------------------------ market hub
+local function prompt(parent: Instance, action: string, object: string, dist: number?, key: Enum.KeyCode?): ProximityPrompt
+	local pp = Instance.new("ProximityPrompt")
+	pp.ActionText = action
+	pp.ObjectText = object
+	pp.HoldDuration = 0
+	pp.MaxActivationDistance = dist or 12
+	pp.KeyboardKeyCode = key or Enum.KeyCode.E
+	pp.RequiresLineOfSight = false
+	pp.Parent = parent
+	return pp
+end
+
+local function billboard(parent: Instance, title: string, subtitle: string, height: number, w: number?): (TextLabel, TextLabel)
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(w or 180, 54)
+	bb.StudsOffset = Vector3.new(0, height, 0)
+	bb.AlwaysOnTop = false
+	bb.MaxDistance = 90
+	bb.LightInfluence = 0
+	bb.Parent = parent
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundColor3 = Color3.fromRGB(15, 30, 55)
+	bg.BackgroundTransparency = 0.18
+	bg.Parent = bb
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = bg
+	local t = Instance.new("TextLabel")
+	t.Name = "Title"
+	t.Size = UDim2.new(1, -8, 0.55, 0)
+	t.Position = UDim2.fromOffset(4, 2)
+	t.BackgroundTransparency = 1
+	t.Font = Enum.Font.FredokaOne
+	t.TextScaled = true
+	t.TextColor3 = Color3.new(1, 1, 1)
+	t.Text = title
+	t.Parent = bg
+	local s = Instance.new("TextLabel")
+	s.Name = "Subtitle"
+	s.Size = UDim2.new(1, -8, 0.38, 0)
+	s.Position = UDim2.new(0, 4, 0.58, 0)
+	s.BackgroundTransparency = 1
+	s.Font = Enum.Font.GothamBold
+	s.TextScaled = true
+	s.TextColor3 = Color3.fromHex("#ffd54f")
+	s.Text = subtitle
+	s.Parent = bg
+	return t, s
+end
+
+function World.BuildHub(root: Instance)
+	local H = Config.Hub
+	local hub = Instance.new("Folder")
+	hub.Name = "Market"
+	hub.Parent = root
+	local out = {}
+
+	local function stall(pos: Vector3, color: string, stripe: string, sign: string, npcColors: { string }, title: string, sub: string)
+		local m = Models.BuildStall(color, stripe, sign, 3.4)
+		m:PivotTo(CFrame.new(pos) * FACE_PLAZA)
+		for _, d in m:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.CanCollide = true
+			end
+		end
+		m.Parent = hub
+		local npc = Models.BuildNPC(npcColors[1], npcColors[2], npcColors[3])
+		npc:PivotTo(CFrame.new(pos + Vector3.new(0, 0, 0.15 * S)) * FACE_PLAZA)
+		npc.Parent = hub
+		local anchor = part(hub, Vector3.new(4, 4, 1), CFrame.new(pos + Vector3.new(0, 4, 1.4 * S)), "#000000", nil, { Transparency = 1, CanCollide = false, Name = sign .. "Prompt" })
+		billboard(anchor, title, sub, 8.5, 220)
+		return anchor, npc
+	end
+	local sellAnchor, sellNpc = stall(H.Sell, "#1e88e5", "#e3f2fd", "SNOW BUYER", { "#1565c0", "#f9a825", "#e3f2fd" }, "SNOW BUYER", Config.SNOW_VALUE .. " coin per snow")
+	local shopAnchor, shopNpc = stall(H.Shop, "#c62828", "#fff8e1", "TOOL SHOP", { "#6d4c41", "#c62828", "#43a047" }, "TOOL SHOP", "Shopping list inside!")
+	out.SellPrompt = prompt(sellAnchor, "Sell snow pile", "Snow Buyer")
+	out.ShopPrompt = prompt(shopAnchor, "Open shopping list", "Tool Shop")
+	out.SellNpc, out.ShopNpc = sellNpc, shopNpc
+	CollectionService:AddTag(sellNpc, "Vendor")
+	CollectionService:AddTag(shopNpc, "Vendor")
+
+	-- snow pile corral (the mound itself is drawn per player on the client)
+	local ring = H.PileRadius + 1.4
+	for i = 0, 17 do
+		local a = i / 18 * math.pi * 2
+		if math.abs(a - math.pi / 2) > 0.5 then
+			local p = part(hub, Vector3.new(1.5, 2.4, 0.36), CFrame.new(H.Pile.X + math.cos(a) * ring, 1.2, H.Pile.Z + math.sin(a) * ring) * CFrame.Angles(0, -a + math.pi / 2, 0), "#8d6e63", Enum.Material.Wood)
+			p.CanCollide = true
+		end
+	end
+	local pileBase = part(hub, Vector3.new(0.4, H.PileRadius * 2, H.PileRadius * 2), CFrame.new(H.Pile + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.pi / 2), "#dfe8f3", Enum.Material.Snow, { Name = "PileBase", Shape = Enum.PartType.Cylinder, CanCollide = false })
+	billboard(pileBase, "SNOW PILE", "Toss your snow here", 9, 200)
+	out.PileBase = pileBase
+
+	-- tool display: 20 items on 4 tight tiers right beside the shop stall
+	local displayFolder = Instance.new("Folder")
+	displayFolder.Name = "ToolDisplay"
+	displayFolder.Parent = hub
+	local o, cols, sx, sz = H.DisplayOrigin, H.DisplayCols, H.DisplayStepX, H.DisplayStepZ
+	local width = cols * sx + 1.2
+	for r = 0, 3 do
+		local hgt = (0.25 + (3 - r) * 0.28) * S
+		local z = o.Z + r * sz + sz / 2
+		part(displayFolder, Vector3.new(width, hgt, sz), CFrame.new(o.X + width / 2 - 0.6, hgt / 2, z), "#e8e2d6", Enum.Material.Marble, { CanCollide = true })
+		part(displayFolder, Vector3.new(width, 0.2, 0.2), CFrame.new(o.X + width / 2 - 0.6, hgt, z + sz / 2 - 0.1), "#c62828")
+	end
+	local banner = part(displayFolder, Vector3.new(1, 1, 1), CFrame.new(o.X + width / 2, 12, o.Z + 1), "#000000", nil, { Transparency = 1, CanCollide = false })
+	billboard(banner, "TOOLS & MACHINES", "Walk up or click one", 0, 240)
+
+	out.Displays = {}
+	for i, tool in Config.Tools do
+		local fromFront = (i - 1) // 5 -- 0..3: hand tools in front, machines at the back
+		local r = 3 - fromFront
+		local c = (i - 1) % 5
+		local hgt = (0.25 + (3 - r) * 0.28) * S
+		local x = o.X + c * sx + sx / 2 - 0.6
+		local z = o.Z + r * sz + sz / 2
+		local holder = Instance.new("Model")
+		holder.Name = "Display_" .. tool.id
+		holder:SetAttribute("ToolId", tool.id)
+		local ped = part(holder, Vector3.new(0.36, 3.6, 3.6), CFrame.new(x, hgt + 0.18, z) * CFrame.Angles(0, 0, math.pi / 2), if tool.kind == "hand" then "#90caf9" else "#ffcc80", Enum.Material.SmoothPlastic, { Shape = Enum.PartType.Cylinder, Name = "Pedestal" })
+		ped.CanCollide = false
+		local top = hgt + 0.36
+		-- the model
+		local m = Models.Build(tool.id)
+		if tool.kind == "hand" then
+			m:PivotTo(CFrame.Angles(math.rad(-15), 0, 0))
+		end
+		local _, size = m:GetBoundingBox()
+		local scale = if tool.kind == "hand" then math.min(1.3, 3.4 / math.max(size.Y, 0.8)) else 3.2 / math.max(size.X, size.Z)
+		m:ScaleTo(scale)
+		local bcf, bsize = m:GetBoundingBox()
+		local pivot = m:GetPivot()
+		local offset = Vector3.new(x, top, z) - Vector3.new(bcf.Position.X, bcf.Position.Y - bsize.Y / 2, bcf.Position.Z)
+		m:PivotTo(pivot + offset)
+		m.Name = "Item"
+		m:SetAttribute("SpinCentre", Vector3.new(x, top, z))
+		m.Parent = holder
+		local hit = part(holder, Vector3.new(3.8, math.max(4, bsize.Y + 1), 3.8), CFrame.new(x, top + math.max(4, bsize.Y + 1) / 2, z), "#000000", nil, { Transparency = 1, CanCollide = false, Name = "Hit" })
+		hit.CanQuery = true
+		local click = Instance.new("ClickDetector")
+		click.MaxActivationDistance = 80
+		click.Parent = hit
+		local pp = prompt(hit, "Inspect", tool.name, 7)
+		pp.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+		local title, sub = billboard(hit, tool.name, "🪙 " .. Config.FormatNumber(tool.price), bsize.Y / 2 + 1.4, 150)
+		title.Name = "Title"
+		sub.Name = "Subtitle"
+		holder.Parent = displayFolder
+		CollectionService:AddTag(holder, "ToolDisplay")
+		table.insert(out.Displays, { id = tool.id, click = click, prompt = pp })
+	end
+
+	-- spin wheel stand
+	local post = "#5d4037"
+	part(hub, Vector3.new(0.6, 9.6, 0.6), CFrame.new(H.Wheel + Vector3.new(-4.8, 4.8, 0)), post, Enum.Material.Wood, { CanCollide = true })
+	part(hub, Vector3.new(0.6, 9.6, 0.6), CFrame.new(H.Wheel + Vector3.new(4.8, 4.8, 0)), post, Enum.Material.Wood, { CanCollide = true })
+	part(hub, Vector3.new(10.8, 0.9, 3), CFrame.new(H.Wheel + Vector3.new(0, 0.45, 0)), post, Enum.Material.Wood, { CanCollide = true })
+	part(hub, Vector3.new(9.6, 0.4, 0.4), CFrame.new(H.Wheel + Vector3.new(0, 9.4, 0)), post, Enum.Material.Wood)
+	local wheel = Models.BuildWheel(1.4)
+	wheel.Name = "SpinWheel"
+	wheel:PivotTo(CFrame.new(H.Wheel + Vector3.new(0, 5.7, 0.4)) * FACE_PLAZA)
+	wheel.Parent = hub
+	CollectionService:AddTag(wheel, "SpinWheel")
+	local pointer = Instance.new("WedgePart")
+	pointer.Anchored = true
+	pointer.Size = Vector3.new(0.3, 1.2, 0.8)
+	pointer.Color = Color3.fromHex("#e53935")
+	pointer.CFrame = CFrame.new(H.Wheel + Vector3.new(0, 10.2, 0.6)) * CFrame.Angles(math.pi, 0, 0) * CFrame.Angles(0, math.pi / 2, 0)
+	pointer.Parent = hub
+	local wheelAnchor = part(hub, Vector3.new(4, 4, 1), CFrame.new(H.Wheel + Vector3.new(0, 4, 2)), "#000000", nil, { Transparency = 1, CanCollide = false, Name = "WheelPrompt" })
+	billboard(wheelAnchor, "LUCKY SPIN", "Free spin every day!", 9, 220)
+	out.WheelPrompt = prompt(wheelAnchor, "Spin the wheel", "Lucky Spin")
+	local wclick = Instance.new("ClickDetector")
+	wclick.MaxActivationDistance = 80
+	wclick.Parent = wheelAnchor
+	out.WheelClick = wclick
+
+	-- daily gift
+	local gift = Models.BuildGift()
+	gift:ScaleTo(1)
+	gift:PivotTo(CFrame.new(H.Gift))
+	gift.Parent = hub
+	CollectionService:AddTag(gift, "Gift")
+	local giftAnchor = part(hub, Vector3.new(3.6, 3.6, 3.6), CFrame.new(H.Gift + Vector3.new(0, 1.8, 0)), "#000000", nil, { Transparency = 1, CanCollide = true, Name = "GiftPrompt" })
+	billboard(giftAnchor, "DAILY REWARD", "Claim every day", 4.5, 200)
+	out.GiftPrompt = prompt(giftAnchor, "Claim daily reward", "Gift")
+	local gclick = Instance.new("ClickDetector")
+	gclick.MaxActivationDistance = 80
+	gclick.Parent = giftAnchor
+	out.GiftClick = gclick
+
+	-- plaza tree and benches
+	local tree = Models.BuildXmasTree()
+	tree:PivotTo(CFrame.new(11.5 * S, 0, 2.2 * S))
+	tree.Parent = hub
+	part(hub, Vector3.new(3, 10, 3), CFrame.new(11.5 * S, 5, 2.2 * S), "#000000", nil, { Transparency = 1, CanCollide = true })
+	for _, bx in { -8 * S, 6 * S } do
+		local bench = Instance.new("Model")
+		bench.Name = "Bench"
+		local wood = "#8d6e63"
+		part(bench, Vector3.new(6, 0.3, 1.8), CFrame.new(bx, 1.5, 4.6 * S), wood, Enum.Material.Wood, { CanCollide = true })
+		part(bench, Vector3.new(6, 1.5, 0.24), CFrame.new(bx, 2.55, 4.6 * S + 0.84), wood, Enum.Material.Wood, { CanCollide = true })
+		for _, sx2 in { -2.55, 2.55 } do
+			part(bench, Vector3.new(0.24, 1.5, 1.5), CFrame.new(bx + sx2, 0.75, 4.6 * S), "#263238", Enum.Material.Metal, { CanCollide = true })
+		end
+		bench.Parent = hub
+	end
+
+	return out
+end
+
+return World
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="10">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="11">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="Folder" referent="12">
+        <Properties>
+          <string name="Name">Client</string>
+        </Properties>
+        <Item class="LocalScript" referent="13">
+          <Properties>
+            <string name="Name">Client</string>
+            <string name="Source"><![CDATA[--!nonstrict
+-- Clear the Snow: client. Input, HUD, shopping list, daily rewards, spin wheel,
+-- and local-only effects (your own snow pile mound, display turntables, snowfall).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Models = require(Shared.Models)
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local fmt = Config.FormatNumber
+local H = Config.Hub
+
+pcall(function()
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
+
+-- ------------------------------------------------------------------ ui helpers
+local C = {
+	panel = Color3.fromRGB(18, 36, 66),
+	panel2 = Color3.fromRGB(32, 58, 98),
+	accent = Color3.fromHex("#ffd54f"),
+	good = Color3.fromHex("#3cc48a"),
+	bad = Color3.fromHex("#e0505a"),
+	text = Color3.fromRGB(243, 247, 255),
+	muted = Color3.fromRGB(169, 187, 214),
+	ink = Color3.fromRGB(15, 30, 55),
+}
+
+local function new(className: string, props: { [string]: any }?, children: { Instance }?): any
+	local inst = Instance.new(className)
+	for k, v in props or {} do
+		if k ~= "Parent" then
+			(inst :: any)[k] = v
+		end
+	end
+	for _, c in children or {} do
+		c.Parent = inst
+	end
+	if props and props.Parent then
+		inst.Parent = props.Parent
+	end
+	return inst
+end
+local function corner(r: number?)
+	return new("UICorner", { CornerRadius = UDim.new(0, r or 12) })
+end
+local function pad(px: number)
+	return new("UIPadding", {
+		PaddingTop = UDim.new(0, px),
+		PaddingBottom = UDim.new(0, px),
+		PaddingLeft = UDim.new(0, px),
+		PaddingRight = UDim.new(0, px),
+	})
+end
+local function label(props)
+	local base = {
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		TextColor3 = C.text,
+		TextScaled = true,
+	}
+	for k, v in props do
+		base[k] = v
+	end
+	return new("TextLabel", base)
+end
+local function button(props)
+	local base = {
+		AutoButtonColor = true,
+		BackgroundColor3 = C.accent,
+		Font = Enum.Font.FredokaOne,
+		TextColor3 = C.ink,
+		TextScaled = true,
+	}
+	for k, v in props do
+		base[k] = v
+	end
+	local b = new("TextButton", base, { corner(12) })
+	return b
+end
+
+local gui = new("ScreenGui", {
+	Name = "ClearTheSnowUI",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Parent = player:WaitForChild("PlayerGui"),
+})
+local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- ------------------------------------------------------------------ HUD
+local top = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(260, 200), Parent = gui }, {
+	new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
+})
+local function pill(order: number, height: number)
+	return new("Frame", { BackgroundColor3 = C.panel, BackgroundTransparency = 0.05, Size = UDim2.fromOffset(200, height), LayoutOrder = order, Parent = top }, { corner(height // 2), pad(6) })
+end
+local coinPill = pill(1, 46)
+local coinText = label({ Text = "🪙 0", Size = UDim2.fromScale(1, 1), Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, Parent = coinPill })
+local pilePill = pill(2, 34)
+local pileText = label({ Text = "⛰ Pile: 0", Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Left, Parent = pilePill })
+local boostsFrame = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(200, 70), LayoutOrder = 3, Parent = top }, {
+	new("UIListLayout", { Padding = UDim.new(0, 4) }),
+})
+
+local bottom = new("Frame", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -16),
+	Size = UDim2.fromOffset(420, 84),
+	Parent = gui,
+})
+new("UISizeConstraint", { MaxSize = Vector2.new(420, 84), Parent = bottom })
+local toolText = label({ Text = "Bare Hands", Size = UDim2.new(1, 0, 0, 24), Font = Enum.Font.FredokaOne, TextStrokeTransparency = 0.5, Parent = bottom })
+local bar = new("Frame", { BackgroundColor3 = C.panel, Position = UDim2.fromOffset(0, 28), Size = UDim2.new(1, 0, 0, 28), ClipsDescendants = true, Parent = bottom }, { corner(14) })
+local barFill = new("Frame", { BackgroundColor3 = Color3.fromRGB(220, 238, 255), Size = UDim2.fromScale(0, 1), Parent = bar }, { corner(14) })
+local barText = label({ Text = "0 / 1 snow", Size = UDim2.fromScale(1, 0.8), Position = UDim2.fromScale(0, 0.1), TextColor3 = C.ink, ZIndex = 2, Parent = bar })
+local hint = label({
+	Text = if isTouch then "Hold SCOOP in the snow" else "Hold click or F to scoop · R auto-scoop",
+	Size = UDim2.new(1, 0, 0, 18),
+	Position = UDim2.fromOffset(0, 62),
+	Font = Enum.Font.Gotham,
+	TextColor3 = C.ink,
+	TextStrokeColor3 = Color3.new(1, 1, 1),
+	TextStrokeTransparency = 0.3,
+	Parent = bottom,
+})
+
+local side = new("Frame", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -12, 0.5, 0),
+	Size = UDim2.fromOffset(78, 330),
+	Parent = gui,
+}, { new("UIListLayout", { Padding = UDim.new(0, 10), VerticalAlignment = Enum.VerticalAlignment.Center }) })
+local function sideButton(icon: string, text: string)
+	local b = new("TextButton", { BackgroundColor3 = C.panel, Size = UDim2.fromOffset(74, 70), Text = "", AutoButtonColor = true, Parent = side }, { corner(16) })
+	label({ Text = icon, Size = UDim2.new(1, 0, 0.55, 0), Position = UDim2.fromScale(0, 0.06), Parent = b })
+	label({ Text = text, Size = UDim2.new(1, 0, 0.28, 0), Position = UDim2.fromScale(0, 0.64), Parent = b })
+	local badge = new("TextLabel", {
+		BackgroundColor3 = C.bad,
+		Size = UDim2.fromOffset(24, 24),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(1, -4, 0, 4),
+		Font = Enum.Font.GothamBold,
+		TextColor3 = Color3.new(1, 1, 1),
+		TextScaled = true,
+		Text = "!",
+		Visible = false,
+		Parent = b,
+	}, { corner(12) })
+	return b, badge
+end
+local shopBtn = sideButton("🛒", "Shop")
+local dailyBtn, dailyBadge = sideButton("🎁", "Daily")
+local spinBtn, spinBadge = sideButton("🎡", "Spin")
+local autoBtn = sideButton("🔁", "Auto: Off")
+
+-- toast + floaters
+local toast = new("TextLabel", {
+	BackgroundColor3 = C.panel,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.fromScale(0.5, 0.16),
+	Size = UDim2.fromOffset(420, 64),
+	Font = Enum.Font.FredokaOne,
+	TextColor3 = C.text,
+	TextScaled = true,
+	Visible = false,
+	ZIndex = 20,
+	Parent = gui,
+}, { corner(14), pad(10) })
+local toastToken = 0
+local function showToast(text: string, secs: number?)
+	toastToken += 1
+	local my = toastToken
+	toast.Text = text
+	toast.Visible = true
+	task.delay(secs or 2.4, function()
+		if toastToken == my then
+			toast.Visible = false
+		end
+	end)
+end
+local function floater(text: string, color: Color3?)
+	local f = label({
+		Text = text,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.42),
+		Size = UDim2.fromOffset(300, 44),
+		Font = Enum.Font.FredokaOne,
+		TextColor3 = color or C.accent,
+		TextStrokeTransparency = 0.2,
+		ZIndex = 15,
+		Parent = gui,
+	})
+	TweenService:Create(f, TweenInfo.new(1.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Position = UDim2.fromScale(0.5, 0.32),
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	}):Play()
+	task.delay(1.4, function()
+		f:Destroy()
+	end)
+end
+
+-- touch scoop button
+local scoopHeld = { mouse = false, key = false, touch = false }
+local sendScoop
+if isTouch then
+	local tb = new("TextButton", {
+		BackgroundColor3 = Color3.fromRGB(191, 227, 255),
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -110, 1, -110),
+		Size = UDim2.fromOffset(96, 96),
+		Font = Enum.Font.FredokaOne,
+		Text = "SCOOP",
+		TextColor3 = C.ink,
+		TextScaled = true,
+		Parent = gui,
+	}, { new("UICorner", { CornerRadius = UDim.new(1, 0) }), pad(14) })
+	tb.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			scoopHeld.touch = true
+			sendScoop()
+		end
+	end)
+	tb.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			scoopHeld.touch = false
+			sendScoop()
+		end
+	end)
+end
+
+-- ------------------------------------------------------------------ panels
+local panels = {}
+local function makePanel(name: string, title: string, size: Vector2)
+	local p = new("Frame", {
+		Name = name,
+		BackgroundColor3 = C.panel,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(size.X, size.Y),
+		Visible = false,
+		ZIndex = 10,
+		Parent = gui,
+	}, { corner(20), pad(16), new("UISizeConstraint", { MaxSize = size }) })
+	new("UIScale", { Parent = p })
+	label({ Text = title, Size = UDim2.new(1, -50, 0, 34), Font = Enum.Font.FredokaOne, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 11, Parent = p })
+	local close = button({ Text = "✕", Size = UDim2.fromOffset(36, 36), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), BackgroundColor3 = C.panel2, TextColor3 = C.text, ZIndex = 11, Parent = p })
+	close.Activated:Connect(function()
+		p.Visible = false
+	end)
+	panels[name] = p
+	return p
+end
+local spinning = false
+local function closeAll()
+	if spinning then
+		return
+	end
+	for _, p in panels do
+		p.Visible = false
+	end
+end
+local function fitPanels()
+	local vp = Workspace.CurrentCamera.ViewportSize
+	for _, p in panels do
+		local s = math.min(1, (vp.X - 24) / p.Size.X.Offset, (vp.Y - 60) / p.Size.Y.Offset)
+		p:FindFirstChildOfClass("UIScale").Scale = math.max(0.45, s)
+	end
+end
+
+-- ---------- shop
+local shop = makePanel("Shop", "🛒 Tool Shop — Shopping List", Vector2.new(900, 560))
+local tab = "hand"
+local tabs = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 44), Size = UDim2.new(1, 0, 0, 40), ZIndex = 11, Parent = shop }, {
+	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }),
+})
+local tabHand = button({ Text = "Hand Tools", Size = UDim2.new(0.5, -4, 1, 0), ZIndex = 11, Parent = tabs })
+local tabMachine = button({ Text = "Machines", Size = UDim2.new(0.5, -4, 1, 0), ZIndex = 11, Parent = tabs })
+local list = new("ScrollingFrame", {
+	BackgroundTransparency = 1,
+	Position = UDim2.fromOffset(0, 94),
+	Size = UDim2.new(1, 0, 1, -94),
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ScrollBarThickness = 8,
+	ZIndex = 11,
+	Parent = shop,
+}, {
+	new("UIGridLayout", { CellSize = UDim2.fromOffset(165, 300), CellPadding = UDim2.fromOffset(10, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
+})
+
+local function ownedSet(): { [string]: boolean }
+	local s = {}
+	for id in string.gmatch(player:GetAttribute("Owned") or "hands", "[^,]+") do
+		s[id] = true
+	end
+	return s
+end
+
+-- 3D thumbnail of a model in a ViewportFrame
+local function thumbnail(id: string, parent: Instance)
+	local vf = new("ViewportFrame", {
+		BackgroundColor3 = Color3.fromRGB(40, 70, 112),
+		Size = UDim2.new(1, 0, 0, 140),
+		Ambient = Color3.fromRGB(180, 190, 210),
+		LightColor = Color3.fromRGB(255, 255, 255),
+		LightDirection = Vector3.new(-1, -2, -1),
+		ZIndex = 12,
+		Parent = parent,
+	}, { corner(10) })
+	local m = Models.Build(id)
+	local tool = Config.GetTool(id)
+	if tool.kind == "hand" then
+		m:PivotTo(CFrame.Angles(-0.3, 0.6, 0.5))
+	else
+		m:PivotTo(CFrame.Angles(0, 0.7, 0))
+	end
+	m.Parent = vf
+	local cf, size = m:GetBoundingBox()
+	local radius = size.Magnitude / 2
+	local cam = new("Camera", { FieldOfView = 30, Parent = vf })
+	local dir = Vector3.new(0.35, 0.45, -1).Unit
+	local dist = radius / math.tan(math.rad(15)) * 1.02
+	cam.CFrame = CFrame.lookAt(cf.Position + dir * dist, cf.Position)
+	vf.CurrentCamera = cam
+	return vf
+end
+
+local cards = {}
+local function renderShop(focus: string?)
+	tabHand.BackgroundColor3 = if tab == "hand" then C.accent else C.panel2
+	tabHand.TextColor3 = if tab == "hand" then C.ink else C.text
+	tabMachine.BackgroundColor3 = if tab == "machine" then C.accent else C.panel2
+	tabMachine.TextColor3 = if tab == "machine" then C.ink else C.text
+	local owned = ownedSet()
+	local coins = player:GetAttribute("Coins") or 0
+	local equipped = player:GetAttribute("Equipped")
+	for i, tool in Config.Tools do
+		local card = cards[tool.id]
+		if not card then
+			card = new("Frame", { BackgroundColor3 = C.panel2, LayoutOrder = i, ZIndex = 11, Parent = list }, { corner(14), pad(8) })
+			thumbnail(tool.id, card)
+			label({ Name = "Name", Text = i .. ". " .. tool.name, Position = UDim2.fromOffset(0, 146), Size = UDim2.new(1, 0, 0, 34), TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
+			label({ Text = tool.desc, Position = UDim2.fromOffset(0, 182), Size = UDim2.new(1, 0, 0, 30), Font = Enum.Font.Gotham, TextColor3 = C.muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Parent = card })
+			label({
+				Text = string.format("Carries %s · Width %.0f", fmt(tool.capacity), tool.radius * 2),
+				Position = UDim2.fromOffset(0, 214),
+				Size = UDim2.new(1, 0, 0, 16),
+				Font = Enum.Font.Gotham,
+				TextColor3 = C.accent,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 12,
+				Parent = card,
+			})
+			label({
+				Text = "Scoop " .. tostring(tool.rate) .. "/s · Speed " .. tostring(tool.speed),
+				Position = UDim2.fromOffset(0, 232),
+				Size = UDim2.new(1, 0, 0, 16),
+				Font = Enum.Font.Gotham,
+				TextColor3 = C.accent,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 12,
+				Parent = card,
+			})
+			local b = button({ Name = "Action", Text = "", Position = UDim2.new(0, 0, 1, -34), Size = UDim2.new(1, 0, 0, 34), ZIndex = 12, Parent = card })
+			new("UIStroke", { Color = C.accent, Thickness = 3, Enabled = false, Parent = card })
+			b.Activated:Connect(function()
+				local ok, msg = Remotes.BuyTool:InvokeServer(tool.id)
+				if msg then
+					showToast((if ok then "🎉 " else "") .. msg)
+				end
+				task.wait(0.1)
+				renderShop(tool.id)
+			end)
+			cards[tool.id] = card
+		end
+		card.Visible = tool.kind == tab
+		local b = card.Action
+		local prevOwned = i == 1 or owned[Config.Tools[i - 1].id]
+		if equipped == tool.id then
+			b.Text = "✔ Equipped"
+			b.BackgroundColor3 = Color3.fromRGB(93, 109, 134)
+			b.Active = false
+		elseif owned[tool.id] then
+			b.Text = "Equip"
+			b.BackgroundColor3 = Color3.fromHex("#4fa3e0")
+			b.Active = true
+		elseif not prevOwned then
+			b.Text = "🔒 Buy previous first"
+			b.BackgroundColor3 = Color3.fromRGB(93, 109, 134)
+			b.Active = false
+		else
+			b.Text = "Buy 🪙 " .. fmt(tool.price)
+			b.BackgroundColor3 = if coins >= tool.price then C.good else Color3.fromRGB(93, 109, 134)
+			b.Active = true
+		end
+		card.BackgroundTransparency = if not owned[tool.id] and not prevOwned then 0.45 else 0
+		card:FindFirstChildOfClass("UIStroke").Enabled = tool.id == focus
+	end
+	if focus and cards[focus] then
+		task.defer(function()
+			local c = cards[focus]
+			local y = c.AbsolutePosition.Y - list.AbsolutePosition.Y + list.CanvasPosition.Y
+			list.CanvasPosition = Vector2.new(0, math.max(0, y - 10))
+		end)
+	end
+end
+tabHand.Activated:Connect(function()
+	tab = "hand"
+	renderShop()
+end)
+tabMachine.Activated:Connect(function()
+	tab = "machine"
+	renderShop()
+end)
+local function openShop(focus: string?)
+	closeAll()
+	if focus then
+		tab = Config.GetTool(focus).kind
+	end
+	renderShop(focus)
+	shop.Visible = true
+end
+
+-- ---------- daily rewards
+local daily = makePanel("Daily", "🎁 Daily Rewards", Vector2.new(520, 420))
+label({ Text = "Come back every day to keep your streak. Day 7 is the big one!", Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham, TextColor3 = C.muted, ZIndex = 11, Parent = daily })
+local grid = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 72), Size = UDim2.new(1, 0, 0, 200), ZIndex = 11, Parent = daily }, {
+	new("UIGridLayout", { CellSize = UDim2.new(0.25, -8, 0, 92), CellPadding = UDim2.fromOffset(8, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
+})
+local dayCells = {}
+for i = 1, #Config.DailyRewards do
+	local cell = new("Frame", { BackgroundColor3 = if i == 7 then Color3.fromHex("#7a4fd0") else C.panel2, LayoutOrder = i, ZIndex = 11, Parent = grid }, { corner(12), pad(6) })
+	label({ Text = "Day " .. i, Size = UDim2.new(1, 0, 0, 16), TextColor3 = C.muted, ZIndex = 12, Parent = cell })
+	label({ Name = "Reward", Text = "", Position = UDim2.fromOffset(0, 20), Size = UDim2.new(1, 0, 0, 40), TextWrapped = true, ZIndex = 12, Parent = cell })
+	label({ Name = "Check", Text = "✔", Position = UDim2.fromOffset(0, 62), Size = UDim2.new(1, 0, 0, 18), TextColor3 = C.good, Visible = false, ZIndex = 12, Parent = cell })
+	new("UIStroke", { Color = C.accent, Thickness = 3, Enabled = false, Parent = cell })
+	dayCells[i] = cell
+end
+local claimBtn = button({ Text = "Claim", Position = UDim2.new(0, 0, 1, -86), Size = UDim2.new(1, 0, 0, 48), ZIndex = 11, Parent = daily })
+local dailyInfo = label({ Text = "", Position = UDim2.new(0, 0, 1, -30), Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham, TextColor3 = C.muted, ZIndex = 11, Parent = daily })
+
+local function untilTomorrow(): string
+	local t = Workspace:GetServerTimeNow()
+	local left = 86400 - (t % 86400)
+	return string.format("%dh %dm", math.floor(left / 3600), math.floor((left % 3600) / 60))
+end
+local function renderDaily()
+	local can = player:GetAttribute("DailyCanClaim")
+	local idx = player:GetAttribute("DailyIndex") or 1
+	local progress = player:GetAttribute("ProgressCoins") or 10
+	for i, r in Config.DailyRewards do
+		local cell = dayCells[i]
+		local coins = math.max(r.min, math.floor(progress * r.pct + 0.5))
+		cell.Reward.Text = "🪙 " .. fmt(coins) .. (if r.spins > 0 then "\n🎡 +" .. r.spins else "")
+		local done = if can then i < idx else i <= idx
+		cell.Check.Visible = done
+		cell.BackgroundTransparency = if done then 0.5 else 0
+		cell:FindFirstChildOfClass("UIStroke").Enabled = can and i == idx
+	end
+	claimBtn.Text = if can then "Claim Day " .. idx else "Claimed today ✔"
+	claimBtn.BackgroundColor3 = if can then C.accent else Color3.fromRGB(93, 109, 134)
+	claimBtn.Active = can == true
+	local streak = player:GetAttribute("DailyStreak") or 0
+	if can and player:GetAttribute("DailyBroken") then
+		dailyInfo.Text = "Your streak reset. Start again today!"
+	elseif can then
+		dailyInfo.Text = "Current streak: " .. streak .. " day" .. (if streak == 1 then "" else "s")
+	else
+		dailyInfo.Text = "Streak: " .. streak .. " · next reward in " .. untilTomorrow()
+	end
+end
+claimBtn.Activated:Connect(function()
+	if not player:GetAttribute("DailyCanClaim") then
+		return
+	end
+	local rw = Remotes.ClaimDaily:InvokeServer()
+	if rw then
+		showToast("🎁 +" .. fmt(rw.coins) .. " coins" .. (if rw.spins > 0 then " and +" .. rw.spins .. " spin" .. (if rw.spins > 1 then "s" else "") else "") .. "!")
+	end
+	task.wait(0.15)
+	renderDaily()
+end)
+local function openDaily()
+	closeAll()
+	renderDaily()
+	daily.Visible = true
+end
+
+-- ---------- spin wheel
+local spinPanel = makePanel("Spin", "🎡 Lucky Spin", Vector2.new(480, 560))
+local wheelHolder = new("Frame", {
+	BackgroundTransparency = 1,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 56),
+	Size = UDim2.fromOffset(340, 340),
+	ZIndex = 11,
+	Parent = spinPanel,
+})
+local wheelDisc = new("Frame", { BackgroundColor3 = Color3.fromHex("#ffd54f"), Size = UDim2.fromScale(1, 1), ZIndex = 11, Parent = wheelHolder }, {
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }),
+})
+local nSeg = #Config.Wheel
+local segDeg = 360 / nSeg
+for i, s in Config.Wheel do
+	local arm = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Rotation = (i - 1) * segDeg, ZIndex = 12, Parent = wheelDisc })
+	local width = 2 * math.sin(math.rad(segDeg / 2)) * 0.47
+	local petal = new("Frame", {
+		BackgroundColor3 = Color3.fromHex(s.color),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(width * 1.08, 0.47),
+		ZIndex = 12 + (i % 2),
+		Parent = arm,
+	}, { corner(18) })
+	label({
+		Text = s.label,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.33),
+		Size = UDim2.fromScale(1.6, 0.16),
+		Rotation = -90,
+		Font = Enum.Font.FredokaOne,
+		TextStrokeTransparency = 0.5,
+		ZIndex = 14,
+		Parent = petal,
+	})
+end
+new("Frame", { BackgroundColor3 = Color3.fromHex("#ffd54f"), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.2, 0.2), ZIndex = 16, Parent = wheelDisc }, {
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }),
+})
+label({ Text = "▼", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 0, 14), Size = UDim2.fromOffset(44, 44), TextColor3 = C.bad, TextStrokeTransparency = 0, ZIndex = 18, Parent = wheelHolder })
+local spinBtnGo = button({ Text = "Spin!", Position = UDim2.new(0, 0, 1, -96), Size = UDim2.new(1, 0, 0, 50), ZIndex = 11, Parent = spinPanel })
+local spinInfo = label({ Text = "", Position = UDim2.new(0, 0, 1, -38), Size = UDim2.new(1, 0, 0, 34), Font = Enum.Font.Gotham, TextColor3 = C.muted, TextWrapped = true, ZIndex = 11, Parent = spinPanel })
+
+local function renderSpin()
+	local n = player:GetAttribute("Spins") or 0
+	local free = player:GetAttribute("FreeSpin")
+	spinBtnGo.Text = if spinning then "Spinning…" elseif free then "Free Spin!" elseif n > 0 then "Spin! (" .. n .. " left)" else "No spins left"
+	spinBtnGo.BackgroundColor3 = if not spinning and n > 0 then C.accent else Color3.fromRGB(93, 109, 134)
+	local base = math.max(10, math.floor((player:GetAttribute("ProgressCoins") or 10) * 0.1 + 0.5))
+	spinInfo.Text = if n == 0
+		then "Free spin resets in " .. untilTomorrow() .. ". Daily rewards give bonus spins."
+		else "Coin prizes right now: 🪙 " .. fmt(base) .. " up to " .. fmt(base * 25)
+end
+
+-- the 3D wheel in the plaza spins along with the UI wheel
+local plazaWheel, plazaBase
+task.spawn(function()
+	plazaWheel = CollectionService:GetTagged("SpinWheel")[1]
+	while not plazaWheel do
+		task.wait(1)
+		plazaWheel = CollectionService:GetTagged("SpinWheel")[1]
+	end
+	plazaBase = plazaWheel:GetPivot()
+end)
+local wheelAngle = 0 -- degrees, UI rotation (clockwise)
+local function setWheel(deg: number)
+	wheelAngle = deg
+	wheelDisc.Rotation = deg
+	if plazaWheel and plazaBase then
+		plazaWheel:PivotTo(plazaBase * CFrame.Angles(0, 0, math.rad(deg)))
+	end
+end
+
+spinBtnGo.Activated:Connect(function()
+	if spinning or (player:GetAttribute("Spins") or 0) <= 0 then
+		return
+	end
+	spinning = true
+	renderSpin()
+	local result = Remotes.Spin:InvokeServer()
+	if not result then
+		spinning = false
+		renderSpin()
+		return
+	end
+	local start = wheelAngle
+	local want = -(result.index - 1) * segDeg + (math.random() - 0.5) * segDeg * 0.6
+	local delta = (want - start) % 360
+	local finish = start + 360 * 6 + delta
+	local t0, dur = os.clock(), 4.2
+	while true do
+		local k = math.min(1, (os.clock() - t0) / dur)
+		local e = 1 - (1 - k) ^ 4
+		setWheel(start + (finish - start) * e)
+		if k >= 1 then
+			break
+		end
+		RunService.RenderStepped:Wait()
+	end
+	setWheel(wheelAngle % 360)
+	spinning = false
+	showToast("🎡 " .. Config.Wheel[result.index].label .. "\n" .. result.message, 3)
+	renderSpin()
+end)
+local function openSpin()
+	closeAll()
+	renderSpin()
+	spinPanel.Visible = true
+end
+
+-- ---------- help
+local help = makePanel("Help", "❄ Clear the Snow", Vector2.new(520, 420))
+label({
+	Text = "1. Walk into the snow and hold click (or F) to scoop it up. Each tool only carries so much.\n"
+		.. "2. Bring it back to the Snow Pile at the market. You toss it in automatically.\n"
+		.. "3. Talk to the Snow Buyer to sell your whole pile for coins.\n"
+		.. "4. The Tool Shop is right next door. Walk up to the display or click a tool to see it.\n"
+		.. "5. Snow grows back, so keep clearing! Claim your daily reward and free spin every day.",
+	Position = UDim2.fromOffset(0, 46),
+	Size = UDim2.new(1, 0, 1, -110),
+	Font = Enum.Font.Gotham,
+	TextScaled = false,
+	TextSize = 17,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	ZIndex = 11,
+	Parent = help,
+})
+local go = button({ Text = "Let's go!", Position = UDim2.new(0, 0, 1, -52), Size = UDim2.new(1, 0, 0, 50), ZIndex = 11, Parent = help })
+go.Activated:Connect(function()
+	help.Visible = false
+end)
+
+shopBtn.Activated:Connect(function()
+	openShop()
+end)
+dailyBtn.Activated:Connect(openDaily)
+spinBtn.Activated:Connect(openSpin)
+autoBtn.Activated:Connect(function()
+	Remotes.SetAuto:FireServer(not player:GetAttribute("Auto"))
+end)
+
+Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitPanels)
+fitPanels()
+
+-- ------------------------------------------------------------------ HUD refresh
+local function refreshHud()
+	local coins = player:GetAttribute("Coins") or 0
+	local load = player:GetAttribute("Load") or 0
+	local cap = player:GetAttribute("Capacity") or 1
+	coinText.Text = "🪙 " .. fmt(coins)
+	pileText.Text = "⛰ Pile: " .. fmt(player:GetAttribute("Pile") or 0)
+	local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
+	toolText.Text = (if tool.kind == "machine" then "🚜 " else "🧤 ") .. tool.name
+	local fill = math.clamp(load / cap, 0, 1)
+	barFill.Size = UDim2.fromScale(fill, 1)
+	barFill.BackgroundColor3 = if fill >= 0.999 then Color3.fromHex("#ff8a8a") else Color3.fromRGB(220, 238, 255)
+	barText.Text = fmt(load) .. " / " .. fmt(cap) .. " snow"
+	dailyBadge.Visible = player:GetAttribute("DailyCanClaim") == true
+	local spins = player:GetAttribute("Spins") or 0
+	spinBadge.Visible = spins > 0
+	spinBadge.Text = tostring(spins)
+	for _, c in autoBtn:GetChildren() do
+		if c:IsA("TextLabel") and c.Text:sub(1, 4) == "Auto" then
+			c.Text = if player:GetAttribute("Auto") then "Auto: On" else "Auto: Off"
+		end
+	end
+	-- boosts
+	local now = Workspace:GetServerTimeNow()
+	for _, c in boostsFrame:GetChildren() do
+		if c:IsA("TextLabel") then
+			c:Destroy()
+		end
+	end
+	for _, b in { { "BoostSell", "💰 2x Sell", C.accent }, { "BoostCapacity", "❄ 2x Capacity", C.good } } do
+		local left = (player:GetAttribute(b[1]) or 0) - now
+		if left > 0 then
+			new("TextLabel", {
+				BackgroundColor3 = b[3],
+				Size = UDim2.fromOffset(170, 26),
+				Font = Enum.Font.GothamBold,
+				TextScaled = true,
+				TextColor3 = C.ink,
+				Text = string.format("%s %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60)),
+				Parent = boostsFrame,
+			}, { corner(8), pad(4) })
+		end
+	end
+	hint.Visible = not isTouch or not player:GetAttribute("Auto")
+	if shop.Visible then
+		renderShop()
+	end
+	if daily.Visible then
+		renderDaily()
+	end
+	if spinPanel.Visible and not spinning then
+		renderSpin()
+	end
+end
+for _, a in { "Coins", "Load", "Capacity", "Pile", "Equipped", "Owned", "Spins", "DailyCanClaim", "Auto", "BoostSell", "BoostCapacity" } do
+	player:GetAttributeChangedSignal(a):Connect(refreshHud)
+end
+task.spawn(function()
+	while true do
+		task.wait(1)
+		refreshHud()
+	end
+end)
+
+-- ------------------------------------------------------------------ input
+function sendScoop()
+	Remotes.SetScooping:FireServer(scoopHeld.mouse or scoopHeld.key or scoopHeld.touch)
+end
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		scoopHeld.mouse = true
+		sendScoop()
+	elseif input.KeyCode == Enum.KeyCode.F then
+		scoopHeld.key = true
+		sendScoop()
+	elseif input.KeyCode == Enum.KeyCode.R then
+		Remotes.SetAuto:FireServer(not player:GetAttribute("Auto"))
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		scoopHeld.mouse = false
+		sendScoop()
+	elseif input.KeyCode == Enum.KeyCode.F then
+		scoopHeld.key = false
+		sendScoop()
+	end
+end)
+
+-- ------------------------------------------------------------------ server messages
+Remotes.Notify.OnClientEvent:Connect(function(kind, a, b)
+	if kind == "toast" then
+		showToast(a)
+	elseif kind == "open" then
+		if a == "shop" then
+			openShop(b)
+		elseif a == "daily" then
+			openDaily()
+		elseif a == "spin" then
+			openSpin()
+		end
+	elseif kind == "dumped" then
+		floater("+" .. fmt(a) .. " ❄ on the pile", Color3.new(1, 1, 1))
+	elseif kind == "sold" then
+		floater("+" .. fmt(a) .. " 🪙")
+	elseif kind == "full" then
+		local tool = Config.GetTool(player:GetAttribute("Equipped") or "hands")
+		showToast(if tool.kind == "machine" then "Machine full! Drive to the Snow Pile." else "Hands full! Take it to the Snow Pile.")
+	end
+end)
+
+-- ------------------------------------------------------------------ local world effects
+-- your own pile mound
+local mound = new("Part", {
+	Name = "MyPile",
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Material = Enum.Material.Snow,
+	Color = Color3.fromRGB(246, 250, 255),
+	Size = Vector3.new(H.PileRadius * 2, 0.4, H.PileRadius * 2),
+	CFrame = CFrame.new(H.Pile),
+	Parent = Workspace,
+}, { new("SpecialMesh", { MeshType = Enum.MeshType.Sphere }) })
+local arrow = new("Part", {
+	Name = "PileArrow",
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Material = Enum.Material.Neon,
+	Color = Color3.fromHex("#ffd54f"),
+	Size = Vector3.new(2.4, 2.4, 2.4),
+	Parent = Workspace,
+	Shape = Enum.PartType.Ball,
+})
+
+-- falling snow around the camera
+local snowEmitterPart = new("Part", {
+	Name = "Snowfall",
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Transparency = 1,
+	Size = Vector3.new(140, 1, 140),
+	Parent = Workspace,
+})
+new("ParticleEmitter", {
+	Texture = "rbxasset://textures/particles/sparkles_main.dds",
+	Color = ColorSequence.new(Color3.new(1, 1, 1)),
+	LightEmission = 0.4,
+	Size = NumberSequence.new(0.35),
+	Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 0.6) }),
+	Lifetime = NumberRange.new(8, 12),
+	Rate = 260,
+	Speed = NumberRange.new(5, 8),
+	SpreadAngle = Vector2.new(15, 15),
+	Acceleration = Vector3.new(0.6, 0, 0.3),
+	EmissionDirection = Enum.NormalId.Bottom,
+	RotSpeed = NumberRange.new(-40, 40),
+	Parent = snowEmitterPart,
+})
+
+-- display labels (owned / equipped) and turntables
+local function refreshDisplays()
+	local owned = ownedSet()
+	local equipped = player:GetAttribute("Equipped")
+	for _, holder in CollectionService:GetTagged("ToolDisplay") do
+		local id = holder:GetAttribute("ToolId")
+		local hit = holder:FindFirstChild("Hit")
+		local bb = hit and hit:FindFirstChildOfClass("BillboardGui")
+		local frame = bb and bb:FindFirstChildOfClass("Frame")
+		local sub = frame and frame:FindFirstChild("Subtitle")
+		if sub then
+			local tool = Config.GetTool(id)
+			sub.Text = if equipped == id then "✔ EQUIPPED" elseif owned[id] then "OWNED" else "🪙 " .. fmt(tool.price)
+			sub.TextColor3 = if owned[id] then Color3.fromHex("#b9f6ca") else C.accent
+		end
+	end
+end
+player:GetAttributeChangedSignal("Owned"):Connect(refreshDisplays)
+player:GetAttributeChangedSignal("Equipped"):Connect(refreshDisplays)
+task.delay(2, refreshDisplays)
+
+local turntables = {}
+local function addTurntable(holder: Instance)
+	local item = holder:WaitForChild("Item", 10)
+	if item and item:IsA("Model") then
+		local centre = item:GetAttribute("SpinCentre")
+		local pivot = item:GetPivot()
+		table.insert(turntables, { model = item, centre = centre, offset = CFrame.new(centre):Inverse() * pivot, phase = #turntables })
+	end
+end
+for _, h in CollectionService:GetTagged("ToolDisplay") do
+	task.spawn(addTurntable, h)
+end
+CollectionService:GetInstanceAddedSignal("ToolDisplay"):Connect(addTurntable)
+
+local tAcc = 0
+RunService.RenderStepped:Connect(function(dt)
+	local t = os.clock()
+	local cam = Workspace.CurrentCamera
+	snowEmitterPart.CFrame = CFrame.new(cam.CFrame.Position + Vector3.new(0, 40, 0))
+	-- pile mound
+	local pile = player:GetAttribute("Pile") or 0
+	local h = math.min(9, 0.4 + math.log10(1 + pile) * 2.4)
+	local cur = mound.Size.Y
+	local y = cur + (h * 2 - cur) * math.min(1, dt * 4)
+	mound.Size = Vector3.new(H.PileRadius * 2, y, H.PileRadius * 2)
+	mound.CFrame = CFrame.new(H.Pile + Vector3.new(0, 0.3, 0))
+	-- bouncing marker over the pile while carrying snow
+	local carrying = (player:GetAttribute("Load") or 0) > 0
+	arrow.Transparency = if carrying then 0 else 1
+	arrow.CFrame = CFrame.new(H.Pile + Vector3.new(0, h + 7 + math.sin(t * 4), 0))
+	-- turntables (throttled, only near the camera)
+	tAcc += dt
+	if tAcc > 1 / 30 then
+		tAcc = 0
+		for _, tt in turntables do
+			if (cam.CFrame.Position - tt.centre).Magnitude < 90 then
+				tt.model:PivotTo(CFrame.new(tt.centre) * CFrame.Angles(0, t * 0.5 + tt.phase, 0) * tt.offset)
+			end
+		end
+	end
+	-- idle plaza wheel
+	if plazaWheel and plazaBase and not spinning then
+		wheelAngle = (wheelAngle + dt * 10) % 360
+		plazaWheel:PivotTo(plazaBase * CFrame.Angles(0, 0, math.rad(wheelAngle)))
+		wheelDisc.Rotation = wheelAngle
+	end
+end)
+
+-- first-time help
+task.spawn(function()
+	while not player:GetAttribute("Ready") do
+		task.wait(0.5)
+	end
+	refreshHud()
+	refreshDisplays()
+	help.Visible = true
+end)
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+</roblox>
