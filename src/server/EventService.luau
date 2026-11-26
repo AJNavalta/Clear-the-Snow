@@ -27,6 +27,10 @@ local E = Config.Events
 
 local EventService = {}
 
+local stale = ReplicatedStorage:FindFirstChild("EventState") -- left by an old copy of the scripts
+if stale then
+	stale:Destroy()
+end
 local state = Instance.new("Folder")
 state.Name = "EventState"
 state.Parent = ReplicatedStorage
