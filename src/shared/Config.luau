@@ -1,7 +1,10 @@
 --!strict
--- Game balance: tools, machines, daily rewards and the spin wheel.
--- capacity = snow carried per trip, rate = snow scooped per second,
--- radius = clearing radius (studs), speed = WalkSpeed while using it.
+-- Everything you're likely to tweak lives here: tool stats and prices, snow regrowth,
+-- daily rewards, the spin wheel, the tutorial text and where the market stands.
+-- Edit, save, and Rojo syncs it into Studio straight away.
+--
+-- Tool columns: capacity = snow carried per trip, rate = snow scooped per second,
+-- radius = clearing radius (metres), speed = walking speed (metres/second).
 
 local Config = {}
 
@@ -99,6 +102,20 @@ Config.Wheel = {
 	{ label = "2x Capacity", kind = "boost", boost = "capacity", mins = 3, color = "#3cc48a", weight = 10 },
 	{ label = "Huge Coins", kind = "coins", mult = 8, color = "#1d5d96", weight = 6 },
 	{ label = "JACKPOT", kind = "coins", mult = 25, color = "#e0505a", weight = 2 },
+}
+
+-- Hands-on tutorial for new players. Each step points an arrow at where to go.
+-- Step 4's %s is replaced by the name of the next tool to buy.
+Config.Tutorial = {
+	Steps = {
+		{ title = "Pick up snow", text = "Walk into the snow and hold click (or F) to scoop until you're full.", touchText = "Walk into the snow and hold SCOOP until you're full." },
+		{ title = "Toss it on the pile", text = "Carry your snow to the Snow Pile. You toss it in when you get close." },
+		{ title = "Sell it", text = "Walk up to the Snow Buyer and press E to sell your pile.", touchText = "Walk up to the Snow Buyer and tap Sell to sell your pile." },
+		{ title = "Buy a new tool", text = "Go to the Tool Shop display and buy the %s." },
+		{ title = "Enjoy the game!", text = "Keep clearing snow, sell it and upgrade all the way to the big machines." },
+	},
+	EnjoySeconds = 7, -- how long the final "Enjoy the game!" card stays up
+	StarterBonus = true, -- first sale tops coins up so a new player can afford the trowel
 }
 
 -- Market layout (studs). The hub sits in the plaza at the centre of town.

@@ -21,6 +21,7 @@ export type Data = {
 	boosts: { sell: number, capacity: number },
 	auto: boolean,
 	totalSold: number,
+	tutorial: number, -- 1..5 = current tutorial step, 0 = finished
 }
 
 local function defaults(): Data
@@ -36,6 +37,7 @@ local function defaults(): Data
 		boosts = { sell = 0, capacity = 0 },
 		auto = false,
 		totalSold = 0,
+		tutorial = 1,
 	}
 end
 

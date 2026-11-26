@@ -389,13 +389,15 @@ function Models.BuildHandTool(id: string): Model
 	if id == "hands" then
 		load(g, 0.26, 0.13, 0.26, 0, -0.05, 0.06)
 	elseif id == "trowel" then
-		cylY(g, 0.03, 0.14, st("#2e7d32"), 0, 0, 0)
-		cylY(g, 0.01, 0.1, M.steel, 0, -0.12, 0)
+		-- drawn a bit larger than life so it reads clearly in the player's hand
+		local k = 1.7
+		cylY(g, 0.03 * k, 0.14 * k, st("#2e7d32"), 0, 0, 0)
+		cylY(g, 0.01 * k, 0.1 * k, M.steel, 0, -0.12 * k, 0)
 		local blade = st("#b9bec6", Enum.Material.Metal)
-		tri(g, v(-0.06, -0.17, 0.02), v(0.06, -0.17, 0.02), v(0, -0.38, 0.06), 0.015, blade)
-		box(g, 0.02, 0.18, 0.04, blade, -0.055, -0.25, 0.04, 0, 0, -0.28)
-		box(g, 0.02, 0.18, 0.04, blade, 0.055, -0.25, 0.04, 0, 0, 0.28)
-		load(g, 0.1, 0.05, 0.1, 0, -0.24, 0.07)
+		tri(g, v(-0.06 * k, -0.17 * k, 0.02 * k), v(0.06 * k, -0.17 * k, 0.02 * k), v(0, -0.38 * k, 0.06 * k), 0.015 * k, blade)
+		box(g, 0.02 * k, 0.18 * k, 0.04 * k, blade, -0.055 * k, -0.25 * k, 0.04 * k, 0, 0, -0.28)
+		box(g, 0.02 * k, 0.18 * k, 0.04 * k, blade, 0.055 * k, -0.25 * k, 0.04 * k, 0, 0, 0.28)
+		load(g, 0.1 * k, 0.05 * k, 0.1 * k, 0, -0.24 * k, 0.07 * k)
 	else
 		local P = SHOVELS[id] or SHOVELS.shovel
 		local shaftSt = st(P.shaft, Enum.Material.Wood)
