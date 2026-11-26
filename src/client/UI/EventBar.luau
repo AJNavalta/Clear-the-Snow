@@ -19,13 +19,14 @@ local EventBar = {}
 local frame = new("Frame", {
 	Name = "EventBar",
 	BackgroundColor3 = C.panel,
-	BackgroundTransparency = 0.05,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 10),
+	BorderSizePixel = 0,
 	Size = UDim2.fromOffset(250, 34),
+	LayoutOrder = 1,
 	ZIndex = 18,
-	Parent = gui,
-}, { Theme.corner(12), new("UIStroke", { Color = C.accent, Thickness = 2, Transparency = 0.4 }) })
+	Parent = Panels.top,
+}, { Theme.corner(12) })
+-- square off the top corners so the bar sits flush against the top edge
+new("Frame", { BackgroundColor3 = C.panel, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 14), ZIndex = 18, Parent = frame })
 local title = label({ Text = "", Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 22), Font = Theme.TitleFont, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 19, Parent = frame })
 local timer = label({ Text = "", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 6), Size = UDim2.fromOffset(70, 22), Font = Theme.TitleFont, TextColor3 = C.accent, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 19, Parent = frame })
 local bar = new("Frame", { BackgroundColor3 = Color3.fromRGB(10, 22, 44), Position = UDim2.fromOffset(12, 34), Size = UDim2.new(1, -24, 0, 24), ClipsDescendants = true, Visible = false, ZIndex = 19, Parent = frame }, { Theme.corner(10) })
@@ -39,8 +40,6 @@ end
 
 RunService.RenderStepped:Connect(function()
 	local now = Workspace:GetServerTimeNow()
-	local tutorial = gui:FindFirstChild("TutorialCard")
-	frame.Position = UDim2.new(0.5, 0, 0, if tutorial and tutorial.Visible then 124 else 10)
 	if state:GetAttribute("Phase") == "active" then
 		frame.Size = UDim2.fromOffset(420, 66)
 		title.Text = state:GetAttribute("Title") or "Event"

@@ -189,24 +189,27 @@ function Hud.refresh()
 	Hud.spinBadge.Text = tostring(spins)
 	autoLabel.Text = if player:GetAttribute("Auto") then "Auto: On" else "Auto: Off"
 
-	for _, c in boostsFrame:GetChildren() do
-		if c:IsA("TextLabel") then
-			c:Destroy()
-		end
-	end
+	-- boost timers: reuse one label per boost instead of rebuilding them every update
 	local now = Workspace:GetServerTimeNow()
-	for _, b in { { "BoostSell", "2x Sell", C.accent }, { "BoostCapacity", "2x Capacity", C.good } } do
+	for i, b in { { "BoostSell", "2x Sell", C.accent }, { "BoostCapacity", "2x Capacity", C.good } } do
 		local left = (player:GetAttribute(b[1]) or 0) - now
+		local tag = boostsFrame:FindFirstChild(b[1])
 		if left > 0 then
-			new("TextLabel", {
-				BackgroundColor3 = b[3],
-				Size = UDim2.fromOffset(170, 26),
-				Font = Theme.BoldFont,
-				TextScaled = true,
-				TextColor3 = C.ink,
-				Text = string.format("%s  %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60)),
-				Parent = boostsFrame,
-			}, { Theme.corner(8), Theme.pad(4) })
+			if not tag then
+				tag = new("TextLabel", {
+					Name = b[1],
+					LayoutOrder = i,
+					BackgroundColor3 = b[3],
+					Size = UDim2.fromOffset(170, 26),
+					Font = Theme.BoldFont,
+					TextScaled = true,
+					TextColor3 = C.ink,
+					Parent = boostsFrame,
+				}, { Theme.corner(8), Theme.pad(4) })
+			end
+			tag.Text = string.format("%s  %d:%02d", b[2], math.floor(left / 60), math.floor(left % 60))
+		elseif tag then
+			tag:Destroy()
 		end
 	end
 	local hands = player:GetAttribute("Equipped") == "hands"

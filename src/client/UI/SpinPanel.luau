@@ -102,7 +102,7 @@ task.spawn(function()
 		task.wait(1)
 		plazaWheel = CollectionService:GetTagged("SpinWheel")[1]
 	end
-	plazaBase = plazaWheel:GetPivot()
+	plazaBase = plazaWheel.PrimaryPart.CFrame
 end)
 
 local angle = 0 -- degrees, clockwise as you look at the wheel
@@ -114,7 +114,7 @@ local function setWheel(deg: number)
 		labels.Rotation = deg
 	end
 	if plazaWheel and plazaBase then
-		plazaWheel:PivotTo(plazaBase * rot)
+		plazaWheel.PrimaryPart.CFrame = plazaBase * rot
 	end
 end
 

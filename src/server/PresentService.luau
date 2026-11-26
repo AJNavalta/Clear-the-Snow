@@ -90,17 +90,18 @@ local function spawnPresent(reward: (Player) -> number, notify: RemoteEvent)
 	-- invisible pickup box
 	local hitbox = Instance.new("Part")
 	hitbox.Name = "Pickup"
-	hitbox.Anchored = true
 	hitbox.CanCollide = false
 	hitbox.CanQuery = false
 	hitbox.Transparency = 1
 	hitbox.Size = Vector3.new(6, 7, 6)
+	hitbox.CFrame = CFrame.new(0, 3, 0)
 	hitbox.Parent = gift
+	local root = Models.Rig(gift) -- falls by moving just the Root
+	hitbox.CanTouch = true
 
 	local entry = { model = gift, hitbox = hitbox, target = spot, y = spot.Y + 120, spin = rng:NextNumber(0, 6), landedAt = nil, taken = false }
 	local function place()
-		gift:PivotTo(CFrame.new(spot.X, entry.y, spot.Z) * CFrame.Angles(0, entry.spin, 0))
-		hitbox.CFrame = CFrame.new(spot.X, entry.y + 3, spot.Z)
+		root.CFrame = CFrame.new(spot.X, entry.y, spot.Z) * CFrame.Angles(0, entry.spin, 0)
 	end
 	place()
 	entry.place = place

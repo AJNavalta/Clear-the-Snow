@@ -19,6 +19,39 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 
+-- ---------------------------------------------------------------- guard against old copies
+-- If the place file still holds an older copy of this game's client script (for example
+-- from an earlier .rbxlx), both would run and the HUD would be drawn twice. Stop any other
+-- "Client" script and remove what it drew, and say where it was so it can be deleted.
+local function isStrayClient(inst: Instance): boolean
+	return inst ~= script and inst:IsA("LocalScript") and inst.Name == "Client"
+end
+local function stopStray(inst: Instance)
+	warn("[ClearTheSnow] Stopped an old copy of the client script at " .. inst:GetFullName()
+		.. ". Delete it in Studio (look in StarterPlayer > StarterPlayerScripts and StarterGui) so only Rojo's copy is left.")
+	inst.Enabled = false
+	inst:Destroy()
+end
+local function sweepStrays()
+	local localPlayer = Players.LocalPlayer
+	for _, root in { localPlayer:FindFirstChild("PlayerScripts"), localPlayer:FindFirstChild("PlayerGui"), localPlayer.Character } do
+		if root then
+			for _, d in root:GetDescendants() do
+				if isStrayClient(d) and not d:IsDescendantOf(script.Parent) then
+					stopStray(d)
+				end
+			end
+		end
+	end
+	for _, c in script.Parent:GetChildren() do
+		if isStrayClient(c) then
+			stopStray(c)
+		end
+	end
+end
+sweepStrays()
+task.delay(3, sweepStrays) -- catch copies that start a little later
+
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 

@@ -74,6 +74,7 @@ function Event.Run(ev)
 	local sleigh = ev.Models.BuildSleigh()
 	local base = CFrame.lookAt(cfg.SleighPosition, cfg.SleighPosition + Vector3.xAxis)
 	sleigh:PivotTo(base)
+	local root = ev.Models.Rig(sleigh) -- move it by its Root only
 	sleigh.Parent = folder
 	ev.Billboard(sleigh.PrimaryPart, "SANTA", "Waiting for a clear road", 9)
 
@@ -95,7 +96,7 @@ function Event.Run(ev)
 			break
 		end
 		-- reindeer get restless
-		sleigh:PivotTo(base * CFrame.new(0, math.abs(math.sin(os.clock() * 3)) * 0.15, 0))
+		root.CFrame = base * CFrame.new(0, math.abs(math.sin(os.clock() * 3)) * 0.15, 0)
 		task.wait(0.2)
 	end
 
@@ -121,7 +122,7 @@ function Event.Run(ev)
 		local x = 4 * t + 3 * t * t
 		local y = math.max(0, t - 1.2) ^ 2 * 2.2
 		local pitch = math.clamp((t - 1.2) * 0.12, 0, 0.35)
-		sleigh:PivotTo(base * CFrame.new(0, y, -x) * CFrame.Angles(pitch, 0, 0))
+		root.CFrame = base * CFrame.new(0, y, -x) * CFrame.Angles(pitch, 0, 0)
 		RunService.Heartbeat:Wait()
 	end
 	return true

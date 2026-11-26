@@ -1289,4 +1289,23 @@ function Models.Weld(model: Model)
 	end
 end
 
+-- Weld every part to the Root and keep only the Root anchored. Moving the model is then a
+-- single CFrame write on the Root (model.PrimaryPart.CFrame = ...), which is far cheaper
+-- than PivotTo on a model with hundreds of parts, and only one part replicates.
+function Models.Rig(model: Model): BasePart
+	Models.Weld(model)
+	local root = model.PrimaryPart :: BasePart
+	root.Anchored = true
+	return root
+end
+
+-- turn off shadows on every part (big savings for detailed models on display)
+function Models.NoShadows(model: Instance)
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.CastShadow = false
+		end
+	end
+end
+
 return Models
